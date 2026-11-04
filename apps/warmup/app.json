@@ -2,7 +2,7 @@
   "id": "warmup",
   "title": "Warm-Up",
   "description": "Oil and coolant warm-up calculator (time to ready), safe rev limit and turbo cool-down",
-  "version": "1.8.0",
+  "version": "1.8.1",
   "vendor": "dante",
   "loggingId": "OA9A",
   "iconGlyph": "temp",
@@ -124,6 +124,17 @@
       "label": "Oil icon on cluster",
       "type": "bool",
       "default": false
+    },
+    {
+      "key": "clusterShow",
+      "label": "Cluster icon shows for",
+      "type": "choice",
+      "default": "both",
+      "options": [
+        ["both", "Cold and hot"],
+        ["hot", "Hot only"],
+        ["cold", "Cold only"]
+      ]
     },
     {
       "key": "hotOil",

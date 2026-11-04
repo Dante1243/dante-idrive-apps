@@ -12,7 +12,9 @@
  *     time (30 s - 3 min) that counts down while driving gently or idling
  *   - optional oil telltale on the instrument cluster (setting "clusterBadge"):
  *     a blue icon while oil is below the warm threshold, an amber icon at/above the
- *     hot threshold ("hotOil"), drawn through cluster-render when installed (CLUSTER.md)
+ *     hot threshold ("hotOil"), drawn through cluster-render when installed (CLUSTER.md).
+ *     The cluster slot shows one thing at a time, so while the icon is up the stock
+ *     widget (media/now-playing) is hidden; "clusterShow" limits this to cold/hot/both.
  */
 const mgu = require('./kit/mgu');
 const { withAlpha } = require('./kit/canvas');
@@ -45,11 +47,14 @@ mgu.run({
             else if (!on && badge) { badge.close(); badge = null; }
             else if (badge) badge.setGeometry(g.x, g.y, g.size);      // live-tune position / size
         }
-        // oil temperature -> which icon (never from demo data): cold below warm, hot at/above hot
+        // oil temperature -> which icon (never from demo data): cold below warm, hot at/above hot.
+        // "clusterShow" limits which states take the cluster slot (it can show only one thing, so
+        // the stock widget is hidden only while the icon is up): both | hot | cold.
         function clusterState(d) {
             if (d.demo || !G.isNum(d.oil)) return 'off';
-            if (d.oil >= settings.get('hotOil')) return 'hot';
-            if (d.oil < settings.get('warmOil')) return 'cold';
+            const mode = settings.get('clusterShow');
+            if (d.oil >= settings.get('hotOil')) return mode === 'cold' ? 'off' : 'hot';
+            if (d.oil < settings.get('warmOil')) return mode === 'hot' ? 'off' : 'cold';
             return 'off';
         }
         badgeApply();

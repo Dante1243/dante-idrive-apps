@@ -32,6 +32,19 @@ Robert Nisipeanu that composits app layers onto the cluster and HUD on iDrive 7 
 **If cluster-render is not installed, the setting does nothing** — the socket never
 connects, every call is a quiet no-op, and the rest of Warm-Up is unaffected.
 
+## Limitation: the cluster slot shows one thing at a time
+
+On iDrive 7, cluster-render's `panel` is a full-screen **slot** that shows one content at a
+time (confirmed on car). While Warm-Up's icon is up, the KOMBI's own right-side widget
+(media / now-playing) is hidden, and it returns the moment the icon goes away. There is no
+sub-region overlay on iDrive 7 that coexists with the stock widgets — it is the icon **or** the
+widget in that slot, not both.
+
+Because of that, **"Cluster icon shows for"** (`clusterShow`) limits when the icon takes the
+slot: **Cold and hot** (default), **Hot only**, or **Cold only**. Cold oil happens every
+startup, so "Hot only" keeps your stock widget except during a genuine overheat; "Cold and hot"
+keeps the original cold indicator at the cost of the widget during warm-up.
+
 ## Changing the artwork or position
 
 - **Art:** replace `oil-cold.png` / `oil-hot.png` in `apps/warmup/`, then regenerate the
