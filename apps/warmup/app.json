@@ -121,22 +121,17 @@
     },
     {
       "key": "clusterBadge",
-      "label": "Cold-oil icon on cluster",
+      "label": "Oil icon on cluster",
       "type": "bool",
       "default": false
     },
     {
-      "key": "clusterPos",
-      "label": "Cluster icon position",
-      "type": "choice",
-      "default": "top-right",
-      "options": [
-        ["top-right", "Top right"],
-        ["top-left", "Top left"],
-        ["bottom-right", "Bottom right"],
-        ["bottom-left", "Bottom left"],
-        ["center", "Centre"]
-      ]
+      "key": "hotOil",
+      "label": "Oil hot icon at",
+      "type": "number",
+      "unit": "°C",
+      "default": 110,
+      "steps": [100, 105, 110, 115, 120, 125]
     },
     {
       "key": "theme",
