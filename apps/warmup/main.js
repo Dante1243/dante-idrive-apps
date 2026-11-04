@@ -10,11 +10,15 @@
  *   - 20-minute temperature trend
  *   - turbo cool-down: hard driving (high rpm or high power) builds up a cool-down
  *     time (30 s - 3 min) that counts down while driving gently or idling
+ *   - optional cold-oil telltale on the instrument cluster (setting "clusterBadge"):
+ *     a blue oil-can icon shown on the cluster while oil is below the warm threshold,
+ *     drawn through cluster-render when it is installed (see CLUSTER.md)
  */
 const mgu = require('./kit/mgu');
 const { withAlpha } = require('./kit/canvas');
 const G = require('./kit/gauges');
 const Car = require('./kit/car');
+const { ClusterBadge } = require('./cluster_badge');
 
 const W = 1600, H = 520;
 const GO = '#2fd27a';
@@ -28,6 +32,22 @@ mgu.run({
     async start(ctx) {
         const { ui, settings } = ctx;
         const car = new Car(ctx, ['rpm', 'speed', 'temps', 'torque']);
+
+        /* ---------- cluster badge: cold-oil telltale on the instrument cluster ---------- */
+        // Needs robertnisipeanu's cluster-render installed; a no-op without it (see CLUSTER.md).
+        let badge = null;
+        function badgeApply() {
+            const on = settings.get('clusterBadge'), pos = settings.get('clusterPos');
+            if (on && (!badge || badge.pos !== pos)) {
+                if (badge) badge.close();
+                badge = new ClusterBadge({ app: 'warmup', pos: pos, log: ctx.log });
+            } else if (!on && badge) {
+                badge.close(); badge = null;
+            }
+        }
+        badgeApply();
+        settings.onChange(badgeApply);
+        process.on('exit', () => { if (badge) badge.close(); });
 
         /* ---------- tracking ---------- */
         const hist = [];             // [t, oil, coolant] every 5 s, 20 min; t = steady clock (mono)
@@ -61,7 +81,9 @@ mgu.run({
                 lastHist = m; hist.push([m, d.oil, d.coolant, d.rpm, d.speed]);
                 while (hist.length > 240) hist.shift();
             }
-        }, () => { hist.length = 0; hardS = 0; needS = 0; cool = 0; doneAt = 0; });
+            // cluster telltale: real oil data below the warm threshold (never from demo data)
+            if (badge) badge.show(!d.demo && G.isNum(d.oil) && d.oil < settings.get('warmOil'));
+        }, () => { hist.length = 0; hardS = 0; needS = 0; cool = 0; doneAt = 0; if (badge) badge.show(false); });
 
         const F = () => settings.get('tempUnit') === 'f';
         const T = (c) => (G.isNum(c) ? (F() ? c * 9 / 5 + 32 : c) : null);
