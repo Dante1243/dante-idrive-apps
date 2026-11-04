@@ -76,6 +76,22 @@ class ClusterBadge {
     /** 'off' | 'cold' | 'hot' */
     setState(s) { if (s !== this.state) { this.state = s; this._apply(); } }
 
+    /** Live-move / resize the badge (from the tuning settings). Re-bakes pixels if size changed. */
+    setGeometry(x, y, size) {
+        const sizeChanged = size != null && size !== this.size;
+        if (x != null) this.x = x;
+        if (y != null) this.y = y;
+        if (sizeChanged) {
+            this.size = size;
+            try { this.px.cold = iconPixels(icons.cold, size); this.px.hot = iconPixels(icons.hot, size); }
+            catch (e) { this.log.warn('cluster badge: resize failed: ' + e); }
+            this.shown = null;                         // force the (new-size) pixels to re-upload
+            if (this.cr && this.cr.ready && this.ref) { this.cr.drop(this.ref); this.ref = 0; this._onReady(); }
+        } else if (this.cr && this.ref) {
+            this.cr.set(this.ref, { x: this.x, y: this.y });
+        }
+    }
+
     close() {
         this.state = 'off';
         if (this.cr) { try { if (this.ref) this.cr.drop(this.ref); this.cr.close(); } catch (e) {} }

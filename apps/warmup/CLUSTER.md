@@ -43,7 +43,9 @@ connects, every call is a quiet no-op, and the rest of Warm-Up is unaffected.
     printf '",\n  hot: "'; base64 -w0 oil-hot.png; printf '"\n};\n'; } > cluster_icons.js
   ```
 
-- **Position / size:** edit `const CLUSTER = { x, y, size }` in `apps/warmup/main.js`.
+- **Position / size:** live-tunable on the car via the settings **Cluster icon X / Y / size**
+  (stepped px). Dial it in, then bake the chosen values as the `default`s of `clusterX` /
+  `clusterY` / `clusterSize` in `app.json`.
 - **Thresholds:** cold uses the existing "Oil is warm at" setting; hot uses "Oil hot icon
   at" (`hotOil`, default 110 °C).
 

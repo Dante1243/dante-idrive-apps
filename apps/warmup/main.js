@@ -35,13 +35,15 @@ mgu.run({
 
         /* ---------- cluster badge: oil telltale on the instrument cluster ---------- */
         // Needs robertnisipeanu's cluster-render installed; a no-op without it (see CLUSTER.md).
-        // Fixed spot chosen on the cluster (just right of the ambient-temp readout).
-        const CLUSTER = { x: 1670, y: 620, size: 90 };
+        // Position + size are live-tunable (clusterX / clusterY / clusterSize settings) so the
+        // spot can be dialled in on the car, then baked as the defaults.
         let badge = null;
+        const geom = () => ({ x: settings.get('clusterX'), y: settings.get('clusterY'), size: settings.get('clusterSize') });
         function badgeApply() {
-            const on = settings.get('clusterBadge');
-            if (on && !badge) badge = new ClusterBadge({ app: 'warmup', x: CLUSTER.x, y: CLUSTER.y, size: CLUSTER.size, log: ctx.log });
+            const on = settings.get('clusterBadge'), g = geom();
+            if (on && !badge) badge = new ClusterBadge({ app: 'warmup', x: g.x, y: g.y, size: g.size, log: ctx.log });
             else if (!on && badge) { badge.close(); badge = null; }
+            else if (badge) badge.setGeometry(g.x, g.y, g.size);      // live-tune position / size
         }
         // oil temperature -> which icon (never from demo data): cold below warm, hot at/above hot
         function clusterState(d) {
