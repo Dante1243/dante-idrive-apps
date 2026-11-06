@@ -2,8 +2,8 @@
 /**
  * car.js - the common driving signals, scaled, with demo fallback.
  *
- *   const car = new Car(ctx, ['rpm', 'speed', 'accel', 'temps', 'gear', 'torque']);
- *   car.data()      -> { rpm, speed, gLong, gLat, coolant, oil, gear, torque, demo }
+ *   const car = new Car(ctx, ['rpm', 'speed', 'accel', 'temps', 'gear', 'torque', 'boost', 'ambient']);
+ *   car.data()      -> { rpm, speed, gLong, gLat, coolant, oil, gear, torque, boost, ambient, demo }
  *   car.onSample(fn)-> fn(data, tMs) on every new speed/rpm/accel sample (also in demo, 20 Hz)
  *
  * Scalings are BMW's own (M Laptimer TypeConverters); an app's app.json
@@ -21,6 +21,9 @@ const SCALE = {
     temp: { factor: 1, offset: -48, invalid: 255 },
     // 12 bit, 0.5 Nm per bit with 0 Nm at raw 2047 (negative = engine braking), 4095 = 'no value'
     torque: { factor: 0.5, offset: -1023.5, invalid: 65535, invalidFrom: 4095 },
+    // sport-display boost (bar, gauge) and exterior / ambient air temperature (deg C)
+    boost: { factor: 0.01, offset: 0, invalid: 255 },
+    ambient: { factor: 0.5, offset: -40, invalid: 255 },
 };
 const GEARS = { G1: 1, G2: 2, G3: 3, G4: 4, G5: 5, G6: 6, G7: 7, G8: 8, G9: 9, G10: 10, R: -1, N_OR_P: 0 };
 // the binding may hand enums over as names or as wire numbers (G1 = 3 ... G10 = 12, R = 1, N_OR_P = 2)
@@ -52,6 +55,8 @@ const SIGNALS = {
     accel: ['de.bmw.infotainment.vehicle.CDS2', 'statusLongitudinalAccelerationMassCenter', 'statusLateralAccelerationMassCenter'],
     gear: ['de.bmw.infrastructure.VehicleInformation', 'statusGearboxDrive', 'DataPowerTrain2'],
     torque: ['de.bmw.infotainment.drivingexcitement.FES', 'statusActualValueTorque2'],
+    boost: ['de.bmw.infotainment.drivingexcitement.FES', 'statusSwitchDriveDynamicSport2'],
+    ambient: ['de.bmw.infrastructure.EnvironmentalInformation', 'ExteriorTemperature'],
 };
 
 /**
@@ -119,6 +124,9 @@ class Car {
         }
         // negative torque (engine braking while the rpm falls) counts as 0
         if (groups.includes('torque')) add('de.bmw.infotainment.drivingexcitement.FES', 'statusActualValueTorque2', (v) => { const tq = sc('torque', v.actualValueTorqueCrankshaft); put('torque', tq === null ? null : Math.max(0, tq)); });
+        // sport-display boost (bar) and outside-air temperature (deg C) - plain signals, for the turbo heat model
+        if (groups.includes('boost')) add('de.bmw.infotainment.drivingexcitement.FES', 'statusSwitchDriveDynamicSport2', (v) => put('boost', sc('boost', v.displayBoostPressure)));
+        if (groups.includes('ambient')) add('de.bmw.infrastructure.EnvironmentalInformation', 'ExteriorTemperature', (v) => put('ambient', sc('ambient', v.temperatureExterior)));
         // a parked car sends nothing new for minutes (fields are notified on change), so "no data for
         // a while" doesn't mean "no car": once a signal's provider is there, stay on live data
         this.subs = [];

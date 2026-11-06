@@ -8,8 +8,11 @@
  *     projected on the trend graph; "engine off" when a hybrid drives electric
  *   - safe rev limit that climbs from the cold limit to the redline with oil temp
  *   - 20-minute temperature trend
- *   - turbo cool-down: hard driving (high rpm or high power) builds up a cool-down
- *     time (30 s - 3 min) that counts down while driving gently or idling
+ *   - turbo cool-down from a live heat model (turbo_thermal.js): estimates the turbine /
+ *     downpipe temperature from load, rpm, boost and - crucially - road speed (airflow
+ *     cooling), and says when it has cooled below a coking-safe temperature. A real
+ *     heat-in vs heat-out balance, not a fixed timer (see THERMAL.md); a calibrated
+ *     estimate, tunable on-car from the "turbo ..." log line
  *   - optional oil telltale on the instrument cluster (setting "clusterBadge"):
  *     a blue icon while oil is below the warm threshold, an amber icon at/above the
  *     hot threshold ("hotOil"), drawn through cluster-render when installed (CLUSTER.md).
@@ -21,19 +24,27 @@ const { withAlpha } = require('./kit/canvas');
 const G = require('./kit/gauges');
 const Car = require('./kit/car');
 const { ClusterBadge } = require('./cluster_badge');
+const { TurboThermal } = require('./turbo_thermal');
 
 const W = 1600, H = 520;
 const GO = '#2fd27a';
-const HARD_RPM = 3800, HARD_KW = 90;       // above either = hard use (heats the turbo)
-const GENTLE_RPM = 2800, GENTLE_KW = 40;   // below both = cooling down
-const COOL_MIN = 30, COOL_MAX = 180;       // s of cool-down, growing with the hard-use time
 // typical warm-up rates (deg C / min) until enough has been measured
 const TYPICAL = { oil: { drive: 4, idle: 1.5 }, coolant: { drive: 7, idle: 3 } };
 
 mgu.run({
     async start(ctx) {
         const { ui, settings } = ctx;
-        const car = new Car(ctx, ['rpm', 'speed', 'temps', 'torque']);
+        const car = new Car(ctx, ['rpm', 'speed', 'temps', 'torque', 'boost', 'ambient']);
+
+        /* ---------- turbo / downpipe heat model (turbo_thermal.js, THERMAL.md) ---------- */
+        const turbo = new TurboThermal({
+            ratedKw: settings.get('ratedKw'), boostMax: settings.get('boostMax'),
+            redline: settings.get('redline'), ambientFallback: settings.get('ambientC'),
+        });
+        settings.onChange(() => {
+            turbo.ratedKw = settings.get('ratedKw'); turbo.boostMax = settings.get('boostMax');
+            turbo.redline = settings.get('redline'); turbo.ambientFallback = settings.get('ambientC');
+        });
 
         /* ---------- cluster badge: oil telltale on the instrument cluster ---------- */
         // Needs robertnisipeanu's cluster-render installed; a no-op without it (see CLUSTER.md).
@@ -66,36 +77,27 @@ mgu.run({
         // the head unit sets its clock after start-up: wall-clock times can jump by hours, which
         // threw the trend lines across the screen. A steady clock only ever moves forward.
         const mono = () => { const h = process.hrtime(); return h[0] * 1000 + h[1] / 1e6; };
-        let lastHist = 0, lastT = 0;
-        // cool-down: hardS = seconds of hard use; needS = cool-down it asks for; cool = gentle seconds done
-        let hardS = 0, needS = 0, cool = 0, doneAt = 0;
+        let lastHist = 0, lastT = 0, lastTurboLog = 0;
         car.onSample((d, t) => {
-            // sample times (the demo replays late steps with theirs) are wall-clock: a step back counts as no time,
-            // and "cooled" times its 20 s on the steady clock
+            // sample times (the demo replays late steps with theirs) are wall-clock: a step back counts as no time
             const dt = lastT ? G.clamp(t - lastT, 0, 250) / 1000 : 0, m = mono(); lastT = t;
-            if (G.isNum(d.rpm)) {
-                const kw = G.isNum(d.torque) ? d.torque * d.rpm / 9549 : 0;
-                const hard = d.rpm > HARD_RPM || kw > HARD_KW;
-                const gentle = d.rpm < GENTLE_RPM && kw < GENTLE_KW;
-                if (hard) {
-                    hardS += dt; cool = 0; doneAt = 0;
-                    if (hardS > 8) needS = G.clamp(COOL_MIN + hardS * 3, COOL_MIN, COOL_MAX);
-                } else if (needS > 0 && gentle) {
-                    cool += dt;
-                    if (cool >= needS && !doneAt) doneAt = m;
-                } else if (!needS) {
-                    hardS = Math.max(0, hardS - dt * 0.2);      // short bursts fade away
-                }
-                // "cooled" message stays for 20 s, then all clear
-                if (doneAt && m - doneAt > 20000) { hardS = 0; needS = 0; cool = 0; doneAt = 0; }
-            }
+            if (dt > 0) turbo.update(d, dt);        // live turbo / downpipe heat balance
             if (m - lastHist > 5000 && (G.isNum(d.oil) || G.isNum(d.coolant))) {
                 lastHist = m; hist.push([m, d.oil, d.coolant, d.rpm, d.speed]);
                 while (hist.length > 240) hist.shift();
             }
+            // on-car calibration line: estimated temp, rate, balance and the inputs behind them
+            if (G.isNum(turbo.T) && m - lastTurboLog > 5000) {
+                lastTurboLog = m;
+                const r = turbo.dTdt * 60;
+                ctx.log.info('turbo ' + Math.round(turbo.T) + 'C ' + (r >= 0 ? '+' : '') + r.toFixed(0)
+                    + '/min load ' + turbo.load.toFixed(2) + ' in ' + turbo.heatIn.toFixed(2) + ' out ' + turbo.heatOut.toFixed(2)
+                    + ' spd ' + Math.round(G.isNum(d.speed) ? d.speed : 0) + ' boost ' + (G.isNum(d.boost) ? d.boost.toFixed(2) : '-')
+                    + ' amb ' + (G.isNum(d.ambient) ? Math.round(d.ambient) : '-'));
+            }
             // cluster telltale: cold below the warm threshold, hot at/above the hot threshold
             if (badge) badge.setState(clusterState(d));
-        }, () => { hist.length = 0; hardS = 0; needS = 0; cool = 0; doneAt = 0; if (badge) badge.setState('off'); });
+        }, () => { hist.length = 0; turbo.reset(); if (badge) badge.setState('off'); });
 
         const F = () => settings.get('tempUnit') === 'f';
         const T = (c) => (G.isNum(c) ? (F() ? c * 9 / 5 + 32 : c) : null);
@@ -183,11 +185,16 @@ mgu.run({
             const lim = limit(d.oil);
             const ready = G.isNum(d.oil) && d.oil >= warm;
             const hot = G.isNum(d.oil) && d.oil > 125;
-            const cooling = settings.get('cooldown') && needS > 0;
+            const coke = settings.get('cokeTemp');
+            const haveT = G.isNum(turbo.T);
+            const useTurbo = settings.get('cooldown') && haveT;
+            const soaked = useTurbo && turbo.T > coke;         // turbo still too hot to switch off
+            const rateMin = haveT ? turbo.dTdt * 60 : 0;        // deg C / min (smoothed)
+            const shedding = rateMin < -3;                      // matches secondsToSafe's cooling cutoff
             let st, col;
             if (!G.isNum(d.oil)) { st = 'NO OIL TEMP'; col = t.dim; }
             else if (hot) { st = 'OIL HOT - EASE OFF'; col = t.crit; }
-            else if (cooling) { st = doneAt ? 'COOLED - OK TO SWITCH OFF' : 'TURBO COOL-DOWN'; col = doneAt ? GO : t.warn; }
+            else if (soaked) { st = shedding ? 'TURBO COOL-DOWN' : 'TURBO HOT'; col = t.warn; }
             else if (ready) { st = 'READY'; col = GO; }
             else if (d.oil >= warm - 20) { st = 'WARMING UP'; col = t.warn; }
             else { st = 'COLD'; col = t.cold; }
@@ -195,25 +202,36 @@ mgu.run({
             if (st === 'READY') cv.roundRect(952, 70, 600, 60, 10, withAlpha(col, 0.15 + 0.1 * Math.sin(now / 400)));
             cv.text(st, 1252, 114, st.length > 14 ? 30 : 38, col, { align: 'center', font: 'bold', spacing: 3 });
 
-            if (cooling) {
-                // big countdown: gentle driving / idling cools the turbo and oil
-                const left = Math.max(0, needS - cool);
-                const gentleNow = G.isNum(d.rpm) && d.rpm < GENTLE_RPM;
-                // the oil warm-up stays visible as one line
+            if (soaked) {
+                // turbo above the coking-safe temp: estimated temp, the live heat balance, and the predicted wait
+                const secs = turbo.secondsToSafe(coke);
                 const eo = eta('oil', d.oil, warm, d);
-                const line = eo.state === 'ready' ? 'Oil warm' : eo.state === 'warming' ? 'Oil ready in ~' + Math.max(1, Math.round(eo.min)) + ' min'
-                    : eo.state === 'off' ? 'Engine off - oil not warming' : eo.state === 'stalled' ? 'Oil not warming' : '';
-                cv.text(line, 952, 170, 24, eo.state === 'ready' ? GO : t.dim, { font: 'bold' });
-                cv.text('COOL-DOWN LEFT', 952, 210, 22, t.dim, { font: 'bold', spacing: 1.5 });
-                const lw = cv.text(left > 0 ? String(Math.ceil(left)) : '0', 952, 289, 80, left > 0 ? t.text : GO, { font: 'num' });
-                cv.text('s', 962 + lw, 289, 30, t.dim);
-                cv.text(left > 0 ? (gentleNow ? 'keep it gentle' : 'paused - stay under ' + GENTLE_RPM + ' rpm') : 'done', 1552, 262, 24, left > 0 && !gentleNow ? t.warn : t.text, { align: 'right', font: 'bold' });
-                const f = needS ? G.clamp(cool / needS, 0, 1) : 1;
+                const oilLine = eo.state === 'ready' ? 'Oil warm' : eo.state === 'warming' ? 'Oil ready in ~' + Math.max(1, Math.round(eo.min)) + ' min' : '';
+                if (oilLine) cv.text(oilLine, 952, 170, 24, eo.state === 'ready' ? GO : t.dim, { font: 'bold' });
+                cv.text('TURBO ~' + Math.round(T(turbo.T)) + tU(), 952, 210, 22, t.dim, { font: 'bold', spacing: 1.5 });
+                if (shedding && G.isNum(secs)) {
+                    // big: predicted seconds until coking-safe at the CURRENT speed
+                    const lw = cv.text(String(Math.ceil(secs)), 952, 289, 80, t.text, { font: 'num' });
+                    cv.text('s', 962 + lw, 289, 30, t.dim);
+                    cv.text('to safe - keep moving', 1552, 262, 24, t.text, { align: 'right', font: 'bold' });
+                } else {
+                    // not shedding fast enough for a countdown: show the actual signed rate and nudge for airflow
+                    cv.text((rateMin >= 0 ? '+' : '') + Math.round(rateMin) + tU() + '/min', 952, 285, 44, t.warn, { font: 'bold' });
+                    const hint = rateMin >= 1 ? (G.isNum(d.speed) && d.speed > 5 ? 'still soaking' : 'get airflow to cool')
+                        : 'cooling slowly - keep moving';
+                    cv.text(hint, 1552, 262, 24, t.warn, { align: 'right', font: 'bold' });
+                }
+                // heat-out share of the balance: full green = all heat is being rejected (cooling)
+                const inOut = turbo.heatIn + turbo.heatOut;
+                const f = inOut > 0 ? G.clamp(turbo.heatOut / inOut, 0, 1) : 1;
                 cv.roundRect(952, 303, 600, 12, 6, t.track);
                 if (f > 0) cv.rampRect(952, 303, Math.max(12, 600 * f), 12, 6, [t.warn, GO], 952, 600);
             } else {
                 etaRow(cv, t, 170, 'OIL READY IN', eta('oil', d.oil, warm, d), warm);
                 etaRow(cv, t, 255, 'COOLANT READY IN', eta('coolant', d.coolant, warmC, d), warmC);
+                // one turbo line once the model has a reading and the turbo is below the safe temp
+                if (useTurbo) cv.text('Turbo ~' + Math.round(T(turbo.T)) + tU() + (turbo.T <= coke ? ' - OK to switch off' : ''),
+                    952, 325, 20, turbo.T <= coke ? GO : t.dim, { font: 'bold' });
             }
 
             // ---- safe rev limit (always) + trend

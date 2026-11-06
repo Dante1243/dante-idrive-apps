@@ -1,8 +1,8 @@
 {
   "id": "warmup",
   "title": "Warm-Up",
-  "description": "Oil and coolant warm-up calculator (time to ready), safe rev limit and turbo cool-down",
-  "version": "1.8.1",
+  "description": "Oil and coolant warm-up (time to ready), safe rev limit and a live turbo/downpipe heat model for cool-down",
+  "version": "1.9.0",
   "vendor": "dante",
   "loggingId": "OA9A",
   "iconGlyph": "temp",
@@ -15,7 +15,11 @@
       "statusCarSpeed2": "rs"
     },
     "de.bmw.infotainment.drivingexcitement.FES": {
-      "statusActualValueTorque2": "rs"
+      "statusActualValueTorque2": "rs",
+      "statusSwitchDriveDynamicSport2": "rs"
+    },
+    "de.bmw.infrastructure.EnvironmentalInformation": {
+      "ExteriorTemperature": "s"
     }
   },
   "screens": [
@@ -99,9 +103,41 @@
     },
     {
       "key": "cooldown",
-      "label": "Turbo cool-down after hard driving",
+      "label": "Turbo cool-down (heat model)",
       "type": "bool",
       "default": true
+    },
+    {
+      "key": "ratedKw",
+      "label": "Engine peak power",
+      "type": "number",
+      "unit": "kW",
+      "default": 230,
+      "steps": [110, 130, 150, 170, 190, 210, 230, 250, 280, 320, 380, 450, 550]
+    },
+    {
+      "key": "boostMax",
+      "label": "Max boost (gauge)",
+      "type": "number",
+      "unit": "bar",
+      "default": 1.4,
+      "steps": [0.6, 0.8, 1.0, 1.2, 1.4, 1.6, 1.8, 2.0, 2.4]
+    },
+    {
+      "key": "cokeTemp",
+      "label": "Turbo safe-to-switch-off temp",
+      "type": "number",
+      "unit": "°C",
+      "default": 300,
+      "steps": [250, 275, 300, 325, 350, 375, 400]
+    },
+    {
+      "key": "ambientC",
+      "label": "Ambient (if no outside-temp sensor)",
+      "type": "number",
+      "unit": "°C",
+      "default": 20,
+      "steps": [-20, -10, 0, 10, 20, 30, 40]
     },
     {
       "key": "tempUnit",

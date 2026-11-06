@@ -53,10 +53,15 @@ class Sim {
         this.coolant = Math.min(92, this.coolant + dt * (0.35 + throttle * 0.5));
         this.oil = Math.min(104, this.oil + dt * (0.22 + throttle * 0.55) * (this.coolant > 70 ? 1.2 : 1));
         this.lat += (lat - this.lat) * Math.min(1, dt * 8);
+        // sport-display boost (bar, gauge): vacuum at idle, spooling up under throttle; ~18 deg C outside
+        const boost = throttle > 0.9 ? Math.min(1.45, 0.2 + 1.3 * Math.min(1, rpm / 4800))
+            : throttle > 0.1 ? throttle * 1.1 - 0.4
+            : -0.45 + (Math.random() - 0.5) * 0.03;
         return {
             rpm, speed: this.v, gear: this.v < 0.5 && throttle < 0.9 ? 0 : this.gear,
             gLong: accel / 9.81 + (Math.random() - 0.5) * 0.02, gLat: this.lat / 9.81 + (Math.random() - 0.5) * 0.02,
             coolant: this.coolant, oil: this.oil, torque: throttle > 0.9 ? 380 + 200 * Math.sin(Math.min(1, rpm / 7000) * Math.PI) : 40,
+            boost, ambient: 18,
             throttle,
         };
     }
