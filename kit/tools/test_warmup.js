@@ -1,7 +1,8 @@
 'use strict';
 
-// Warm-Up's turbo cool-down against a stubbed car (kit/car) and the head unit's clock jumping after start-up: the
-// countdown counts a step back of the clock as no time, and "cooled" times its 20 s on the steady clock. No SDK or vehicle needed:
+// Warm-Up against a stubbed car (kit/car) and the head unit's clock jumping after start-up: the heat
+// model counts a step back of the clock as no time and never leaps, the pages draw, and the cluster
+// icon's brief mode keeps to its time. No SDK or vehicle needed:
 //   node kit/tools/test_warmup.js
 
 const assert = require('assert');
@@ -15,18 +16,28 @@ const SPEC = JSON.parse(fs.readFileSync(path.join(ROOT, 'apps', 'warmup', 'app.j
 const { Recorder } = require(path.join(KIT, 'record'));        // what the kit draws into (display.js)
 const themes = require(path.join(KIT, 'themes'));
 
+process.env.MGU_SLOTLAB_DIR = path.join(ROOT, 'no-such-lab');
+process.env.MGU_SLOTLAB_LOG = path.join(ROOT, 'no-such-log');
+
 // the steady clock (process.hrtime) and the head unit's wall clock, moved by hand
 let mono = 5000, wall = Date.UTC(2026, 9, 1, 8);
 process.hrtime = () => [Math.floor(mono / 1000), (mono % 1000) * 1e6];
 Date.now = () => wall;
 
-let app = null, car = null;
+let app = null, car = null, badges = [];
 class FakeCar {
     constructor() { car = this; this.d = {}; }
     onSample(fn) { this.fn = fn; }
     data() { return this.d; }
 }
-const stubs = { './kit/mgu': { run(a) { app = a; } }, './kit/car': FakeCar };
+class FakeBadge {
+    constructor() { this.state = 'off'; this.card = false; this.log = []; badges.push(this); }
+    setState(s) { if (s !== this.state) { this.state = s; this.log.push(s); } }
+    setTestCard(on) { this.card = on; }
+    setGeometry() {}
+    close() { this.closed = true; }
+}
+const stubs = { './kit/mgu': { run(a) { app = a; } }, './kit/car': FakeCar, './cluster_badge': { ClusterBadge: FakeBadge } };
 const load = Module._load;
 Module._load = function (req, parent, isMain) {
     if (stubs[req]) return stubs[req];
@@ -35,16 +46,20 @@ Module._load = function (req, parent, isMain) {
 };
 
 /** A fresh Warm-Up (a new process); render() draws a frame and returns its texts in order. */
-let render = null;
-async function start() {
+let render = null, tab = null, S = null, clicks = {};
+async function start(over) {
     delete require.cache[MAIN];
     require(MAIN);
-    const S = {};
+    S = {};
     SPEC.settings.forEach((s) => { S[s.key] = s.default; });
+    Object.assign(S, over);
+    badges = []; clicks = {};
     let texts = [], frame = null;
     await app.start({
-        ui: { image: async () => {} }, settings: { get: (k) => S[k], onChange() {} }, log: { info() {}, warn() {} },
+        ui: { image: async () => {}, onClick(n, fn) { clicks[n] = fn; }, text() {} },
+        settings: { get: (k) => S[k], set(k, v) { S[k] = v; }, onChange() {} }, log: { info() {}, warn() {} },
         theme: () => themes.theme('m_tricolour'), loop: (name, fps, fn) => { frame = fn; },
+        onTab(fn) { tab = fn; }, hideButton() {},
         canvas: (w, h) => {
             const cv = new Recorder(w, h), text = cv.text.bind(cv);
             texts = [];
@@ -58,40 +73,135 @@ async function start() {
 function drive(d, s) {
     for (let i = 0; i < s * 10; i++) { mono += 100; wall += 100; car.d = d; car.fn(d, wall); }
 }
-const HARD = { rpm: 5000, torque: 300, oil: 95, coolant: 90, speed: 120 };
-const GENTLE = { rpm: 1500, torque: 50, oil: 95, coolant: 90, speed: 50 };
+const HARD = { rpm: 5500, torque: 390, oil: 118, coolant: 104, speed: 150, ambient: 20 };
+const GENTLE = { rpm: 1500, torque: 40, oil: 100, coolant: 95, speed: 50, ambient: 20 };
+const IDLE = { rpm: 750, torque: 20, oil: 100, coolant: 95, speed: 0, ambient: 20 };
+const COLD = { rpm: 750, torque: 20, oil: 40, coolant: 40, speed: 0, ambient: 20 };
+const HOT = { rpm: 3000, torque: 150, oil: 115, coolant: 100, speed: 100, ambient: 20 };
+const has = (t, s) => t.indexOf(s) >= 0;
 const checks = [
-    ['countdown after the clock jumps back', async () => {
+    ['a long hard run asks for a cool-down, and the bearing soak says why', async () => {
         await start();
-        drive(HARD, 20);                          // 20 s hard: 90 s of cool-down
-        drive(GENTLE, 10);
+        assert(!has(await render(), 'TURBO COOL-DOWN'), 'cool-down before driving');
+        drive(HARD, 300);
+        const t = await render();
+        assert(has(t, 'TURBO COOL-DOWN'), 'after 5 hard minutes: ' + t.join(' | '));
+        assert(has(t, 'IF YOU SWITCH OFF NOW'), t.join(' | '));
+    }],
+    ['a short pull from a cruise does not', async () => {
+        await start();
+        drive(GENTLE, 600);
+        drive(HARD, 10);
+        assert(!has(await render(), 'TURBO COOL-DOWN'));
+    }],
+    ['gentle driving clears it', async () => {
+        await start();
+        drive(HARD, 300);
+        drive(GENTLE, 300);
+        const t = await render();
+        assert(!has(t, 'TURBO COOL-DOWN') && has(t, 'READY'), t.join(' | '));
+    }],
+    ['the clock jumping back counts as no time', async () => {
+        await start();
+        drive(HARD, 300);
         wall -= 3 * 3600000;                      // the head unit sets its clock
-        drive(GENTLE, 1);
-        const t = await render();
-        const i = t.indexOf('COOL-DOWN LEFT');
-        assert(i >= 0 && t.indexOf('TURBO COOL-DOWN') >= 0, 'cooling down: ' + t.join(' | '));
-        assert.strictEqual(t[i + 1], '79', 'cool-down left after 11 s gentle of 90 s');
+        drive(IDLE, 1);
+        assert(has(await render(), 'TURBO COOL-DOWN'));
     }],
-    ['"cooled" clears 20 s on after the clock jumps back', async () => {
+    ['the clock jumping ahead does not cool the turbo by hours', async () => {
         await start();
-        drive(HARD, 20);
-        drive(GENTLE, 91);                        // cooled
-        assert((await render()).indexOf('COOLED - OK TO SWITCH OFF') >= 0);
-        wall -= 3 * 3600000;
-        drive(GENTLE, 25);
-        const t = await render();
-        assert(t.indexOf('COOLED - OK TO SWITCH OFF') < 0 && t.indexOf('READY') >= 0, 'all clear: ' + t.join(' | '));
-    }],
-    ['"cooled" stays its 20 s after the clock jumps ahead', async () => {
-        await start();
-        drive(HARD, 20);
-        drive(GENTLE, 91);                        // cooled
+        drive(HARD, 300);
         wall += 3 * 3600000;
-        drive(GENTLE, 5);
-        assert((await render()).indexOf('COOLED - OK TO SWITCH OFF') >= 0, 'still cooled 5 s on');
-        drive(GENTLE, 20);
+        drive(IDLE, 1);
+        assert(has(await render(), 'TURBO COOL-DOWN'), 'three hours passed in one sample');
+    }],
+    ['turned off, there is no cool-down advice', async () => {
+        await start({ cooldown: false });
+        drive(HARD, 300);
+        assert(!has(await render(), 'TURBO COOL-DOWN'));
+    }],
+    ['the Turbo page shows the balance in kW', async () => {
+        await start();
+        drive(GENTLE, 120);
+        await tab(1);
         const t = await render();
-        assert(t.indexOf('COOLED - OK TO SWITCH OFF') < 0 && t.indexOf('READY') >= 0, 'all clear: ' + t.join(' | '));
+        ['EXHAUST GAS', 'HEAT LEAVING IN THE EXHAUST', 'GOING INTO TURBO + DOWNPIPE', 'BEING REJECTED', 'BEARING IF OFF NOW'].forEach((s) => assert(has(t, s), s + ': ' + t.join(' | ')));
+        assert(t.some((x) => /kW$/.test(x)), 'no kW figure');
+    }],
+    ['the Turbo page says when the engine is off and when it is on overrun', async () => {
+        await start();
+        drive(GENTLE, 120);
+        await tab(1);
+        drive({ rpm: 2500, torque: 0, oil: 100, coolant: 95, speed: 100, ambient: 20 }, 2);
+        assert((await render()).some((x) => /OVERRUN/.test(x)));
+        drive({ rpm: 0, torque: 0, oil: 100, coolant: 95, speed: 0, ambient: 20 }, 2);
+        assert((await render()).some((x) => /ENGINE OFF/.test(x)));
+    }],
+    ['the Cluster page draws with no renderer, no log and no tool', async () => {
+        await start();
+        await tab(2);
+        const t = await render();
+        assert(has(t, 'OIL ICON') && has(t, 'SLOT LAB'), t.join(' | '));
+        assert(t.some((x) => /cluster-render not answering/.test(x)));
+        assert(t.some((x) => /Store/.test(x)), 'should say where the tool comes from');
+    }],
+    ['every page draws in Fahrenheit too', async () => {
+        await start({ tempUnit: 'f' });
+        drive(HARD, 300);
+        for (let i = 0; i < 3; i++) { await tab(i); await render(); }
+    }],
+    ['the page buttons go round, and the bar\'s Test icon opens the Cluster page', async () => {
+        await start();
+        await clicks.BTN_PAGE();
+        assert(has(await render(), 'BEING REJECTED'));
+        await clicks.BTN_PAGE();
+        assert(has(await render(), 'OIL ICON'));
+        await clicks.BTN_PAGE();
+        assert(has(await render(), 'SAFE REV LIMIT'));
+        await clicks.BTN_PREV();
+        assert(has(await render(), 'OIL ICON'));
+    }],
+    ['brief: cold oil shows the icon for 10 s, once', async () => {
+        await start({ clusterBadge: true, clusterHold: 'brief' });
+        drive(COLD, 5);
+        assert.strictEqual(badges[0].state, 'cold');
+        drive(COLD, 7);
+        assert.strictEqual(badges[0].state, 'off');
+        drive(COLD, 600);
+        assert.deepStrictEqual(badges[0].log, ['cold', 'off']);
+    }],
+    ['brief: hot oil comes back every 5 minutes', async () => {
+        await start({ clusterBadge: true, clusterHold: 'brief' });
+        drive(HOT, 12);
+        assert.strictEqual(badges[0].state, 'off');
+        drive(HOT, 292);                          // 304 s since it first showed
+        assert.strictEqual(badges[0].state, 'hot');
+        drive(HOT, 12);
+        assert.strictEqual(badges[0].state, 'off');
+    }],
+    ['always: the icon stays', async () => {
+        await start({ clusterBadge: true, clusterHold: 'always' });
+        drive(COLD, 60);
+        assert.strictEqual(badges[0].state, 'cold');
+    }],
+    ['the icon never comes from demo data', async () => {
+        await start({ clusterBadge: true, clusterHold: 'always' });
+        drive(Object.assign({ demo: true }, COLD), 5);
+        assert.strictEqual(badges[0].state, 'off');
+    }],
+    ['Test icon shows it whatever the oil, for its 7 s, and needs no setting', async () => {
+        await start({ clusterBadge: false });
+        drive(IDLE, 1);
+        await tab(2);
+        await render();
+        assert.strictEqual(badges.length, 0);
+        await clicks.BTN_TEST();
+        assert.strictEqual(badges.length, 1, 'no badge for the test');
+        drive(IDLE, 3);
+        assert.strictEqual(badges[0].state, 'cold');
+        drive(IDLE, 5);
+        assert(badges[0].closed, 'the badge should go again');
+        assert((await render()).some((x) => /slot table/i.test(x)), 'the finding should show');
     }],
 ];
 
@@ -101,5 +211,6 @@ const checks = [
         try { await fn(); } catch (e) { failed.push(name); console.error('FAIL ' + name + ': ' + e.message); }
     }
     if (failed.length) process.exit(1);
-    console.log('Warm-Up checks passed (cool-down countdown and "cooled" across wall-clock jumps back and ahead).');
+    console.log('Warm-Up checks passed (' + checks.length + ': cool-down, clock jumps, all three pages, the cluster icon\'s brief mode, Test icon).');
+    process.exit(0);
 })().catch((e) => { console.error(e); process.exit(1); });

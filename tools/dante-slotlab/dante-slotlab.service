@@ -1,0 +1,12 @@
+[Unit]
+Description=Cluster Slot Lab: lets Warm-Up try cluster-render in another KOMBI slot
+RequiresMountsFor=/var/opt
+StartLimitIntervalSec=0
+
+[Service]
+ExecStart=/var/opt/dante-slotlab/current/slotlab.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

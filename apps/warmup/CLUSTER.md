@@ -1,54 +1,110 @@
 # Warm-Up: oil telltale on the instrument cluster
 
-Warm-Up can show an oil telltale **on the instrument cluster** (iDrive 7) that follows
-engine oil temperature:
+Warm-Up can show an oil telltale **on the instrument cluster** (iDrive 7) that follows engine oil
+temperature:
 
 - **cold** icon (blue) while oil is below the **"Oil is warm at"** threshold
 - **nothing** in the healthy band
 - **hot** icon (amber) at/above the **"Oil hot icon at"** threshold (default 110 °C)
 
-Only one shows at a time, in a fixed spot just right of the ambient-temperature readout:
-**x = 1670, y = 620, 90 × 90** in the panel's 1920 × 720 coordinates. It is driven by real
-oil data only (never the demo), and off by default — turn it on with **Settings → "Oil icon
-on cluster"**.
+Only one shows at a time, by default just right of the ambient-temperature readout: **x = 1670,
+y = 620, 90 × 90** in the panel's 1920 × 720 coordinates. It is driven by real oil data only (never
+the demo), and off by default: turn it on with **Settings → "Oil icon on cluster"**.
 
 ## How it works
 
-The MGU app platform draws Warm-Up on the head unit only. To put anything on the
-instrument cluster, the app draws through **cluster-render**, a separate renderer by
-Robert Nisipeanu that composits app layers onto the cluster and HUD on iDrive 7 and 8
+The MGU app platform draws Warm-Up on the head unit only. To put anything on the instrument cluster,
+the app draws through **cluster-render**, a separate renderer by Robert Nisipeanu
 (<https://github.com/robertnisipeanu/idrive-apps>, `native/cluster-render`).
 
-- Warm-Up connects to its socket (`/dev/shm/cluster-render/render.sock`), creates one
-  `image` layer in the `panel` target at the spot above, and swaps the layer's pixels
-  between the two icons / hides it as the oil temperature crosses the thresholds.
-- Client: `kit/runtime/cluster_render.js` — our own MIT implementation of cluster-render's
-  documented `PROTOCOL.md` (v1). No cluster-render code is copied (that project is MPL-2.0);
-  we only speak its wire protocol.
-- Icons: your PNGs, embedded as base64 in `apps/warmup/cluster_icons.js`, decoded and
-  resized to 90 × 90 at startup by `kit/runtime/png.js` (zlib only). They are embedded as
-  `.js` because `build.py` ships only an app dir's `.js` files, not loose images.
+- The KOMBI is its own computer with its own renderer. The head unit sends it scenes, and it shows
+  each one in a numbered **slot**. The slot is the placement: the protocol has no position or size.
+- Warm-Up connects to cluster-render's socket (`/dev/shm/cluster-render/render.sock`), makes an
+  `image` layer in the `panel` target and swaps its pixels as the oil temperature crosses the
+  thresholds.
+- Client: `kit/runtime/cluster_render.js`, our own MIT implementation of the documented
+  `PROTOCOL.md` (v1). No cluster-render code is copied (its client is MPL-2.0, its service GPL-3.0).
+- Icons: your PNGs, embedded as base64 in `apps/warmup/cluster_icons.js`, because `build.py` ships
+  only an app dir's `.js` files.
 
-**If cluster-render is not installed, the setting does nothing** — the socket never
-connects, every call is a quiet no-op, and the rest of Warm-Up is unaffected.
+**If cluster-render is not installed, the setting does nothing**: the socket never connects, every
+call is a quiet no-op, and the rest of Warm-Up is unaffected.
 
-## Limitation: the cluster slot shows one thing at a time
+## Why the icon hides the media widget, and what is being done about it
 
-On iDrive 7, cluster-render's `panel` is a full-screen **slot** that shows one content at a
-time (confirmed on car). While Warm-Up's icon is up, the KOMBI's own right-side widget
-(media / now-playing) is hidden, and it returns the moment the icon goes away. There is no
-sub-region overlay on iDrive 7 that coexists with the stock widgets — it is the icon **or** the
-widget in that slot, not both.
+On this car, with the icon up in `panel`, the media widget goes and its button stops working. The
+stock map stays. Take the icon away and the widget comes back.
 
-Because of that, **"Cluster icon shows for"** (`clusterShow`) limits when the icon takes the
-slot: **Cold and hot** (default), **Hot only**, or **Cold only**. Cold oil happens every
-startup, so "Hot only" keeps your stock widget except during a genuine overheat; "Cold and hot"
-keeps the original cold indicator at the cost of the widget during warm-up.
+What is known:
+
+- `panel` is slot 0x203, and its scene id 0x01000400 is also BMW's speech dialog.
+- cluster-render takes nothing here: a target with `take_over_stock` 0 and no `contend` waits for a
+  free slot. Whatever hides the widget is the KOMBI's own doing.
+- The KOMBI has groups of slots that switch each other off. An F40 owner found on its HUD that a
+  scene in 0x371 makes the KOMBI disable 0x350-0x352 and BMW's guidance goes, while a scene in 0x351
+  sits beside that guidance with nothing lost
+  ([issue 85](https://github.com/robertnisipeanu/idrive-apps/issues/85)). On the HUD, overlays that
+  keep BMW's speed and limit are working on real cars.
+
+What is not known: whether the widget is a head-unit scene or drawn by the KOMBI, and which slots
+this car has. That is what the **Cluster** page is for. An older version of this file said no
+overlay was possible on iDrive 7. Nothing ever established that.
+
+### Keeping the widget: "Cluster icon stays"
+
+Until a better slot turns up, **10 seconds** (the default) shows the icon when its state changes,
+then lets the widget back; hot oil comes back every 5 minutes. **All the time** is the old behaviour.
+**"Cluster icon shows for"** (`clusterShow`) still limits it to cold, hot or both.
+
+### Test icon: no install needed
+
+On the **Cluster** page, with music playing so the widget is up, press **Test icon**. The icon shows
+for 7 seconds whatever the oil is doing, and the page reports which stock slots changed.
+
+- **A stock slot changed**: the widget is head-unit content in that slot, and the name tells you which.
+- **No stock slot changed**: the KOMBI looks to be hiding it by itself, which would rule out capturing it
+  from the head unit, but not moving the icon to another slot.
+
+The page lists the slots from the `dcsm: slot ...` lines of cluster-render's log, if an app can read
+that on your unit. The file is world-readable, but that has not been tried on a car.
+
+### Slot Lab: trying other slots from the car
+
+Moving `panel` takes a change to cluster-render's settings and a restart of it, which an app cannot
+do. **Cluster Slot Lab** is a small optional tool in this repo (`tools/dante-slotlab`) that does just
+that. Install it from the Store under this source, then restart the head unit once: a new service
+only starts at the next boot.
+
+Parked, on the **Cluster** page:
+
+1. **Next slot** moves the icon to the next thing to try. First the same slot with a scene id that
+   is not the speech dialog's, then a pop-up class, then every slot the KOMBI reports free.
+2. A see-through grid covers the scene: columns A-H, rows 1-3, each cell 240 px, so A1 starts at
+   x 0, y 0 and H3 ends at 1920, 720. Look at the cluster. Is any of the grid there, which cells, and
+   is the widget still up? A photo of it is enough to work out where a slot sits.
+3. **Keep this** makes it stick and sets the icon to stay on. **Next slot** moves on. Going round the
+   whole list comes back to stock, and **Stock** does that at any time.
+
+Then set **Cluster icon X / Y** to land in the cells you saw. On the F40's HUD a small slot showed
+only the bottom left of a bigger scene, so expect that here: the spot beside the ambient temperature
+may be out of reach from another slot.
+
+Safety:
+
+- **Only at a standstill.** A trial ends the moment the car moves. Cluster-render notes that a mapping
+  the KOMBI cannot take can make it restart the cluster and the HUD, which you do not want on the road.
+  That was seen with other scene ids, and the lab only uses the three cluster-render allows, but
+  these slots are untested on this car.
+- **Every trial reverts by itself** after 2 minutes unless kept alive by the app, and at the next
+  head-unit start whatever happens. Only **Keep this** lasts.
+- It only offers slots the KOMBI reports free, and never takes one from stock content.
+- It touches only its own block in `cluster-render.local.conf`, and takes it out when removed.
+- Each trial restarts cluster-render, so anything else drawing through it (the Waze map) blinks.
 
 ## Changing the artwork or position
 
-- **Art:** replace `oil-cold.png` / `oil-hot.png` in `apps/warmup/`, then regenerate the
-  embedded module (any machine with `base64`):
+- **Art:** replace `oil-cold.png` / `oil-hot.png` in `apps/warmup/`, then regenerate the embedded
+  module (any machine with `base64`):
 
   ```sh
   cd apps/warmup
@@ -56,23 +112,17 @@ keeps the original cold indicator at the cost of the widget during warm-up.
     printf '",\n  hot: "'; base64 -w0 oil-hot.png; printf '"\n};\n'; } > cluster_icons.js
   ```
 
-- **Position / size:** live-tunable on the car via the settings **Cluster icon X / Y / size**
-  (stepped px). Dial it in, then bake the chosen values as the `default`s of `clusterX` /
-  `clusterY` / `clusterSize` in `app.json`.
-- **Thresholds:** cold uses the existing "Oil is warm at" setting; hot uses "Oil hot icon
-  at" (`hotOil`, default 110 °C).
+- **Position / size:** live-tunable on the car via the settings **Cluster icon X / Y / size**. Dial it
+  in, then bake the chosen values as the `default`s of `clusterX` / `clusterY` / `clusterSize` in
+  `app.json`.
+- **Thresholds:** cold uses the existing "Oil is warm at" setting; hot uses "Oil hot icon at"
+  (`hotOil`, default 110 °C).
 
 ## Requirement: install cluster-render on the car
 
-cluster-render is **not** part of this repository. Through the MGU Store, add Robert
-Nisipeanu's repo as a source (it ships `cluster-render`; the Store pulls `mgu-deploy`
-first) and install it. Nothing in Warm-Up's own build needs it; the dependency is only at
-runtime, and only when the setting is on.
+cluster-render is **not** part of this repository. Through the MGU Store, add Robert Nisipeanu's repo
+as a source (it ships `cluster-render`; the Store pulls `mgu-deploy` first) and install it. Nothing in
+Warm-Up's own build needs it; the dependency is only at runtime, and only when the icon is on.
 
-## Open item to validate on the car
-
-A cluster-render layer lives only while its producer (Warm-Up) stays connected. The app is
-launched with `backgroundPriority: 200`, so it should keep running — and keep the icon up —
-when it is not the foreground screen, but confirm on your own car that the icon stays shown
-after you leave the Warm-Up screen while driving. If MainApp suspends the app in the
-background, the icon drops until you reopen Warm-Up; the client reconnects automatically.
+The app is launched with `backgroundPriority: 200`, and the icon has been seen to stay up with
+another app open.

@@ -1,81 +1,118 @@
-# Warm-Up: the turbo / downpipe heat model
+# Warm-Up: the turbo and downpipe heat balance
 
-Warm-Up's cool-down used to be a timer: "hard driving" (rpm or power over a line) built up
-30 s – 3 min that counted down while you drove gently. That badly under-counts the heat a
-turbo actually soaks up, and it ignored the single biggest cooling factor — **road speed**.
-A hard pull then a crawl home, versus the same pull then a motorway cruise, got the same
-countdown, even though the cruise sheds heat many times faster.
+The **Turbo** page works out, every sample and in real units, how much heat the engine is putting
+into the exhaust and how much of it the turbo and downpipe are taking on or rejecting right now,
+from rpm, torque and road speed.
 
-It is now a **continuous heat balance**. Every sample, Warm-Up estimates the turbine-housing /
-downpipe temperature from how much heat the exhaust is dumping in versus how much is being
-rejected right now at the current load **and vehicle speed**, and tells you when it has
-cooled below a coking-safe temperature.
+**It is an estimate.** No car in this family has an exhaust or housing temperature sensor on the
+bus, so nothing here can be checked on the car without measuring it yourself. What it has instead
+is measured data behind it: the constants are fitted to published tests of gasoline turbos, and
+`kit/tools/test_turbo_thermal.js` holds those measurements and fails if the model drifts off them.
+None of those tests was on a B48, so read the figures as "a turbo like this", not as this car.
 
-## The model (`turbo_thermal.js`)
+## What it tracks
 
-One lumped node at temperature `T`, integrated each sample (°C/s):
+Three lumps of metal, each with its own heat balance (`turbo_thermal.js`):
 
-```
-load  = boost (bar, gauge) blended with brake-power fraction (torque·rpm / rated kW)
-mdot  = rpmFrac · (0.15 + 0.85·load)              exhaust mass-flow proxy
-Tgas  = ambient + egtIdle + egtLoad·load + egtEnrich·enrich(load)   gas temp the metal chases
-                                                   (enrich = the EGT spike from fuel enrichment > ~80% load)
-heat  = kHeat · flow · (Tgas − T)                 IN  — signed: cooler gas after a lift draws heat out
-cConv = (kConv0 + kConvV · speed^0.8) · (T − amb)  OUT — forced airflow  ← the road-speed term
-cRad  = kRad · ((T/1000)^4 − (amb/1000)^4)         OUT — radiation (speed-independent)
-cOil  = kOil · max(0, T − oil)   while running     OUT — oil/water; STOPS at shutdown → heat-soak
-dT/dt = heat − cConv − cRad − cOil
-```
+| Lump | Fed by | Cooled by |
+|---|---|---|
+| Turbine housing | the exhaust gas | radiation first, then air, a little conduction to the bearing housing |
+| Downpipe and first catalyst brick | the gas leaving the turbine, plus the catalyst's own heat | radiation and the air under the car |
+| Bearing housing | conduction from the turbine housing | coolant and oil, until the engine stops |
 
-Qualitatively this gets the things the old timer missed:
+The chain from the signals:
 
-- **Load heats continuously and steeply** — sustained part-throttle or a long climb builds heat
-  even if it never trips a "hard" line; full-boost enrichment spikes it hard.
-- **Speed cools, strongly** — at a standstill cooling collapses to radiation + weak convection
-  (the turbo soaks); at speed `cConv` dominates and it sheds fast. The cool-down countdown is a
-  real prediction from the current rate, so it reads seconds on the motorway and minutes idling.
-- **Shutdown = soak** — oil cooling stops, so a turbo shut off hot stays hot; the model only
-  says "OK to switch off" once `T` is below `cokeTemp`.
+1. **Fuel power** from a Willans line: torque times rpm, plus friction and pumping, over the engine's
+   efficiency. Checked against real figures: about 0.9 l/h at idle, 7.2 l/100 km at 110 km/h, about
+   260 g/s of exhaust at 225 kW.
+2. **Exhaust flow** from the fuel at lambda 1. **Gas temperature** from a map of flow against turbine
+   inlet temperature, which tops out near the 950 C limit. With no fuel going in (overrun) the gas
+   is warm air instead, which is why lifting off cools a hot turbo fastest of all.
+3. **Heat into the metal** by convection, growing with flow. **Heat out** by radiation (emissivity
+   0.92, measured), air (growing with road speed) and coolant.
 
-## Signals it needs
+## The data it is fitted to
 
-All plain subscriptions (no diagnostics), added to `app.json`:
+| Source | What was measured | The model gives |
+|---|---|---|
+| [M] Savaripour et al., Clean Technologies 2022, 1.7 L gasoline | engine-off cool-down from full load: 683 C to 418 C in 450 s | within 9 C rms, 23 C at worst |
+| [M] | warm-up at 2000 rpm, 28 Nm from 8 C | within 29 C rms, 404 C at 820 s against 450 C measured |
+| [M] | full load: wall 643-722 C on average, 839 C at its hottest | 729 C |
+| [M] | bearing housing at full load: 122-155 C | 131 C |
+| [A] Aghaali, KTH 2012, 2 L GDI | 625 C gas holds a 419 C wall | 426 C |
+| [A] | 848 C gas holds a 617 C wall | 613 C |
+| [H] A heat-soak test | bearing housing +60 C after shutdown, to 220 C | +48 C, to 208 C |
 
-| input   | interface / field |
-|---------|-------------------|
-| boost   | `FES.statusSwitchDriveDynamicSport2` → `displayBoostPressure` (×0.01 → bar) |
-| ambient | `EnvironmentalInformation.ExteriorTemperature` → `temperatureExterior` (×0.5 −40 → °C) |
+Turbine inlet temperatures come from [S] Storm, Linkoping/Volvo 2017 (427-877 C over 1000-4000 rpm,
+15-135 Nm) as well as [A] and [M].
 
-plus the rpm / torque / oil / speed Warm-Up already reads. If boost or ambient are missing on a
-car, the model falls back to power-only load and the **Ambient (if no outside-temp sensor)**
-setting, so it still runs.
+Fitted, not measured on this car: the split of the housing's thermal mass and area (so **the kW
+figures carry more doubt than the temperatures**), how much the heat shield and engine bay hold
+radiation back (`bayView`), how much air reaches the turbo at speed (`airHv`), and everything about
+the downpipe, which no paper here measured: its constants are worked out from size and material.
 
-## It is a calibrated estimate — and how to re-bake it
+## What it shows on a B48
 
-There is **no EGT or housing sensor on the bus**, so the absolute temperature is an estimate,
-not a measurement. The constants in `K` (top of `turbo_thermal.js`) are a first pass, tuned so
-idle / cruise / sustained-load land in believable ranges. What's physically trustworthy is the
-*dynamics* — how load and speed move heat in vs out — which is what the cool-down decision uses.
+Warm, 20 C outside, steady state. The hard rows assume about 225 kW; a stock 330i makes about 190 kW, so it reads somewhat lower there:
 
-To calibrate on your car: Warm-Up writes one log line every 5 s —
+| | Gas | Housing | Downpipe | Exhaust carries |
+|---|---|---|---|---|
+| Idle, parked | 380 C | 269 C | 182 C | 1 kW |
+| 60 km/h | 613 C | 421 C | 255 C | 8 kW |
+| 110 km/h | 739 C | 519 C | 359 C | 22 kW |
+| 130 km/h | 832 C | 593 C | 456 C | 39 kW |
+| 160 km/h | 883 C | 651 C | 551 C | 74 kW |
+| Hard climb | 924 C | 727 C | 705 C | 152 kW |
+| Full throttle, held | 945 C | 754 C | 732 C | 283 kW |
 
-```
-turbo <T>C <rate>/min load <0-1.2> in <degC/s> out <degC/s> spd <km/h> boost <bar> amb <degC>
-```
+**Road speed does not beat load.** Airflow helps, but at 110 km/h the engine is still putting more
+heat in than the extra air takes out. After six hard minutes the housing reaches 548 C in 2 minutes
+idling, 562 C at 60 km/h and 591 C at 110 km/h. The fastest cooling is overrun, then low load.
 
-Read it at a warm idle, a steady cruise, and right after a pull, and adjust the `K` constants
-(then they can be baked in):
+**A short pull is not a big event.** 20 s of full throttle from a 110 km/h cruise puts about 47 kW
+into the metal but only lifts the housing about 60 C. It takes sustained load to soak it.
 
-- idle / cruise / WOT temps too high or low  → `egtIdle` / `egtLoad` / `egtEnrich`
-- cools too fast / slow with speed           → `kConvV` (and `kConv0` for the standstill floor)
-- cools too fast / slow while idling          → `kOil`
-- glows and holds heat too long when hot     → `kRad`
+## Cool-down
+
+Housing temperature is the wrong thing to wait on: a housing takes many minutes to get below 300 C,
+at idle it may never go much lower, and it is not what cooks oil. What does is the bearing housing
+after the water and oil stop, so "safe to switch off" asks where the bearing housing would **peak**
+if you stopped now, looking ahead with the model.
+
+- The limit is the setting **Cool down until bearing soak is under** (default 180 C). It is a
+  judgement, not a published figure: I found no hard coking temperature, only that [H] reached 220 C.
+- It takes no credit for BMW's electric turbo coolant pump, which [H] suggests cuts the soak to
+  about 10 C. That is the safe side: it still holds if the pump has failed, which they do. So
+  the figure is a worst case, and with a healthy pump a hot stop is kinder than it looks here.
+- The time shown is how long until that peak is under the limit, at idle and at what you are doing now.
+
+After six hard minutes that is about 90 s idling, and 135 s at a 110 km/h cruise.
+
+## Limits
+
+- It starts from coolant temperature, so after a stop short enough to leave the turbo hot but long
+  enough for the head unit to sleep, it reads low for a few minutes.
+- Torque is what the DME reports. A tune that makes more power than the DME believes reads low.
+- It does not know about catalyst heating after a cold start, or anything else that changes the
+  spark timing at a given load.
+
+## Boost and ambient
+
+Both are plain signals, but neither is load-bearing. Torque and rpm give the fuel power directly,
+so boost only refines the temperature drop across the turbine, and only once it has been seen to
+move: car_vitals treats this field as doubtful for the same reason, as some cars never fill it.
+Without outside temperature it uses the **Ambient** setting.
+
+## Checking it yourself
+
+Warm-Up logs one line every 5 s: `turbo gas .. housing .. downpipe .. bearing .. C, exhaust .. in ..
+out .. kW, soak .., rpm .. Nm .. kmh .. boost .. amb ..`. The easy check is an infrared thermometer
+on the turbine housing right after parking, set to emissivity 0.92, compared with the Turbo page. The
+constants are all in `K` at the top of `turbo_thermal.js`.
 
 ## Settings
 
-- **Turbo cool-down (heat model)** — master on/off (`cooldown`).
-- **Engine peak power** (`ratedKw`) — for the power-fraction part of load. Default 230 kW.
-- **Max boost (gauge)** (`boostMax`) — the boost that counts as full load. Default 1.4 bar.
-- **Turbo safe-to-switch-off temp** (`cokeTemp`) — below this, oil won't coke on the bearing;
-  the "OK to switch off" / countdown pivots on it. Default 300 °C.
-- **Ambient (if no outside-temp sensor)** (`ambientC`) — fallback heat-sink temp. Default 20 °C.
+- **Turbo cool-down advice** (`cooldown`): on or off.
+- **Cool down until bearing soak is under** (`soakLimit`): see above.
+- **Engine size** (`engineL`): 2.0 L for the B48. Scales the flows and the metal.
+- **Ambient (if no outside-temp sensor)** (`ambientC`).

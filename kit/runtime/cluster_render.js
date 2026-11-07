@@ -8,8 +8,8 @@
  * wire format (protocol v1): it contains NO code from cluster-render (which is
  * MPL-2.0) and is MIT like the rest of this kit. It implements only what an app
  * needs to put a static image on the cluster: the hello handshake, an image layer,
- * whole-image RGBA upload, show/hide, and silent auto-reconnect that restores the
- * layer when the renderer (re)appears.
+ * whole-image RGBA upload, show/hide, the service's status text, and silent
+ * auto-reconnect that restores the layer when the renderer (re)appears.
  *
  * It never throws into the app. If cluster-render is not installed, the socket
  * simply never connects and every call is a quiet no-op while it keeps retrying,
@@ -130,9 +130,11 @@ class ClusterRender extends EventEmitter {
                 this.emit('ready', this.backend, this.targets);
                 break;
             case 'layer':  this.emit('layer', ev.ref, ev.state, ev.reason); break;
-            case 'target': this.emit('target', ev.name, ev.state, ev.reason); break;
+            case 'target': this.emit('target', ev.target, ev.state, ev); break;
             case 'budget': this.emit('budget', ev); break;
-            case 'error':  this.emit('error', ev); break;
+            case 'status': this.emit('status', String(ev.text || '')); break;
+            // (an 'error' nobody listens to would throw)
+            case 'error':  if (this.listenerCount('error')) this.emit('error', ev); break;
             default: break;
         }
     }
@@ -143,6 +145,9 @@ class ClusterRender extends EventEmitter {
             if (L.px) this._sendPixels(ref, L.px);
         }
     }
+
+    /** Ask for the service's status text: its targets, slots and layers. Answered by a 'status' event. */
+    status() { return this.ready ? this._send({ op: 'status' }) : false; }
 
     /* ---------- public layer API ---------- */
     /** Create an image layer; returns a client-chosen ref. opts: target,x,y,w,h,[iw,ih,klass,z,visible,sampling]. */

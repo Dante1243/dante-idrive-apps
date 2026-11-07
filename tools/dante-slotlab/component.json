@@ -1,0 +1,23 @@
+{
+  "id": "dante-slotlab",
+  "kind": "tool",
+  "version": "1.0.0",
+  "title": "Cluster Slot Lab",
+  "description": "Lets Warm-Up try its oil icon in other instrument cluster slots from the car, so it can find one that hides nothing. Only touches its own lines in cluster-render's settings, and takes them out when removed",
+  "mguHmi": ["ID7"],
+  "optional": true,
+  "uninstallable": true,
+  "requires": { "mgu-deploy": "0.7.0" },
+  "files": [
+    { "path": "slotlab.sh", "mode": "0755" }
+  ],
+  "units": [
+    { "name": "dante-slotlab.service" }
+  ],
+  "enable": [
+    { "unit": "dante-slotlab.service", "target": "multi-user.target" }
+  ],
+  "recmgr": ["dante-slotlab"],
+  "restart": ["dante-slotlab.service"],
+  "deactivate": ["slotlab.sh", "--restore"]
+}
