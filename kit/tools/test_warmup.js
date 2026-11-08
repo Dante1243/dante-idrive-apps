@@ -46,18 +46,20 @@ Module._load = function (req, parent, isMain) {
 };
 
 /** A fresh Warm-Up (a new process); render() draws a frame and returns its texts in order. */
-let render = null, tab = null, S = null, clicks = {};
+let render = null, tab = null, S = null, clicks = {}, changed = [];
+/** A setting changed from the settings screen: the app hears about it. */
+const setting = (k, v) => { S[k] = v; changed.forEach((fn) => fn(k, v)); };
 async function start(over) {
     delete require.cache[MAIN];
     require(MAIN);
     S = {};
     SPEC.settings.forEach((s) => { S[s.key] = s.default; });
     Object.assign(S, over);
-    badges = []; clicks = {};
+    badges = []; clicks = {}; changed = [];
     let texts = [], frame = null;
     await app.start({
         ui: { image: async () => {}, onClick(n, fn) { clicks[n] = fn; }, text() {} },
-        settings: { get: (k) => S[k], set(k, v) { S[k] = v; }, onChange() {} }, log: { info() {}, warn() {} },
+        settings: { get: (k) => S[k], set(k, v) { S[k] = v; }, onChange(fn) { changed.push(fn); } }, log: { info() {}, warn() {} },
         theme: () => themes.theme('m_tricolour'), loop: (name, fps, fn) => { frame = fn; },
         onTab(fn) { tab = fn; }, hideButton() {},
         canvas: (w, h) => {
@@ -172,6 +174,19 @@ const checks = [
         assert.strictEqual(badges[0].state, 'off');
         drive(COLD, 600);
         assert.deepStrictEqual(badges[0].log, ['cold', 'off']);
+    }],
+    ['brief: switching the icon off and on again shows it again', async () => {
+        await start({ clusterBadge: true, clusterHold: 'brief' });
+        drive(COLD, 12);
+        assert.strictEqual(badges[0].state, 'off');
+        setting('clusterBadge', false);
+        assert(badges[0].closed, 'not taken down');
+        setting('clusterBadge', true);
+        drive(COLD, 1);
+        assert.strictEqual(badges.length, 2);
+        assert.strictEqual(badges[1].state, 'cold', 'back on, but the icon stayed hidden');
+        drive(COLD, 12);
+        assert.strictEqual(badges[1].state, 'off');
     }],
     ['brief: hot oil comes back every 5 minutes', async () => {
         await start({ clusterBadge: true, clusterHold: 'brief' });

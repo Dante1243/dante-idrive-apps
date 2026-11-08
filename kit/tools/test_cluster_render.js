@@ -123,7 +123,9 @@ const checks = [
         await until(() => sv.json.some((m) => m.op === 'layer'), 'layer');
         const l = sv.json.find((m) => m.op === 'layer');
         assert.deepStrictEqual([l.target, l.kind, l.x, l.y, l.w, l.h, l.iw, l.ih, l.visible], ['panel', 'image', 1670, 620, 90, 90, 90, 90, 0]);
-        assert(!('contend' in l), 'contend would take the slot from stock content');
+        // contends, or once the stock content is back in the slot the icon never shows again; it only
+        // moves that content aside where Slot Lab's kept block sets take-over (panel default: off)
+        assert.strictEqual(l.contend, 1, 'the icon must contend');
         b.setState('cold');
         await until(() => sv.frames.length, 'pixels');
         assert.deepStrictEqual([sv.frames[0].rects, sv.frames[0].bytes], [0, 90 * 90 * 4]);
@@ -143,6 +145,7 @@ const checks = [
         await until(() => sv.json.filter((m) => m.op === 'layer').length === 2, 'card layer');
         const l = sv.json.filter((m) => m.op === 'layer')[1];
         assert.deepStrictEqual([l.x, l.y, l.w, l.h, l.iw, l.ih, l.sampling], [0, 0, 1920, 720, 480, 180, 'nearest']);
+        assert(!('contend' in l), 'the test card must never push stock content aside');
         await until(() => sv.frames.some((f) => f.bytes === px.length), 'card pixels');
         b.setTestCard(false);
         await until(() => sv.json.some((m) => m.op === 'drop' && m.ref === l.ref), 'card dropped');

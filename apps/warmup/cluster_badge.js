@@ -77,10 +77,15 @@ class ClusterBadge {
     // called on every (re)connect: (re)create the layer, then re-apply current state + pixels
     _onReady() {
         if (!this.ref) {
+            // contend: when the icon hides, the slot goes back to what the KOMBI had there (an M badge,
+            // say), and the KOMBI never takes a slot from content it shows. A layer that does not contend
+            // waits for the slot to be free, which then never comes: the icon would not show again until
+            // a restart. Contending, on a target the Slot Lab tool set to take over, moves that content
+            // aside for the icon and it comes back when the icon goes (CLUSTER.md)
             this.ref = this.cr.image({
                 target: this.target, klass: 'alert',
                 x: this.x, y: this.y, w: this.size, h: this.size, iw: this.size, ih: this.size,
-                visible: this.state !== 'off',
+                visible: this.state !== 'off', contend: true,
             });
         } else {
             this.cr.set(this.ref, { x: this.x, y: this.y, w: this.size, h: this.size });

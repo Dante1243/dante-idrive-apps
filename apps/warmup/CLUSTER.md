@@ -38,8 +38,9 @@ stock map stays. Take the icon away and the widget comes back.
 What is known:
 
 - `panel` is slot 0x203, and its scene id 0x01000400 is also BMW's speech dialog.
-- cluster-render takes nothing here: a target with `take_over_stock` 0 and no `contend` waits for a
-  free slot. Whatever hides the widget is the KOMBI's own doing.
+- cluster-render takes nothing here: `panel` has `take_over_stock` 0 unless Slot Lab kept a slot,
+  and without it even a contending layer only waits for the slot. Whatever hides the widget is the
+  KOMBI's own doing.
 - The KOMBI has groups of slots that switch each other off. An F40 owner found on its HUD that a
   scene in 0x371 makes the KOMBI disable 0x350-0x352 and BMW's guidance goes, while a scene in 0x351
   sits beside that guidance with nothing lost
@@ -97,9 +98,27 @@ Safety:
   these slots are untested on this car.
 - **Every trial reverts by itself** after 2 minutes unless kept alive by the app, and at the next
   head-unit start whatever happens. Only **Keep this** lasts.
-- It only offers slots the KOMBI reports free, and never takes one from stock content.
+- It only offers slots the KOMBI reports free, and a trial never takes one from stock content.
 - It touches only its own block in `cluster-render.local.conf`, and takes it out when removed.
 - Each trial restarts cluster-render, so anything else drawing through it (the Waze map) blinks.
+
+### A kept slot takes over, so the icon comes back
+
+A slot that looks free when you try it often is not free for good. On a G20 330i, 0x105 is where the
+cluster shows its optional M badge, and the KOMBI never takes a slot from content it is showing: a
+scene sent there is parked out of sight until the slot is free. So once the icon hid (oil warm, or
+the icon switched off) and the M badge was back, the icon could not show there again until the head
+unit restarted. That is why switching it off and on again left it gone.
+
+From Slot Lab 1.1.0 a kept slot is written with `panel_take_over_stock = 1`, and from Warm-Up 1.11.1
+the icon's layer contends. Together, cluster-render moves the stock content aside when the icon
+wants the slot, and the KOMBI puts it back when the icon goes: the M badge disappears while the icon
+shows and returns after it. A slot kept with 1.0.0 is upgraded the next time the tool starts (an
+update from the Store restarts it), with one restart of cluster-render.
+
+Whatever the stock HMI shows in that slot gives way to the icon while it shows. On this car that is
+the M badge; if navigation uses the same slot for its turn box, that would hide too, then come back.
+The test card of a trial never contends.
 
 ## Changing the artwork or position
 

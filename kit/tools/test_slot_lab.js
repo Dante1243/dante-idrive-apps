@@ -263,6 +263,32 @@ const shellChecks = [
         assert(!fs.existsSync(s.conf), 'nothing of ours left');
         q.kill();
     }],
+    ['a kept slot takes over from the stock HMI, so the icon can come back; a trial never does', async () => {
+        const s = withCounter(sandbox());
+        const p = await start(s);
+        await ask(s, 'try 0x105 0x01000400 0 60');
+        assert(!/take_over/.test(fs.readFileSync(s.conf, 'utf8')), 'a trial took over');
+        await ask(s, 'keep');
+        assert(/panel_slot = 0x105\npanel_scene_id = 0x01000400\npanel_content_class = 0\npanel_take_over_stock = 1\n# dante-slotlab end/.test(fs.readFileSync(s.conf, 'utf8')), fs.readFileSync(s.conf, 'utf8'));
+        assert.strictEqual(restarts(s), 2, 'keep must restart the renderer so take-over applies');
+        p.kill();
+    }],
+    ['a slot kept by 1.0.0 gets take-over at the next start, once', async () => {
+        const s = withCounter(sandbox());
+        fs.writeFileSync(s.conf, 'guide_hold = 0\n# dante-slotlab begin kept\npanel_slot = 0x105\npanel_scene_id = 0x01000400\npanel_content_class = 0\n# dante-slotlab end\n');
+        fs.writeFileSync(path.join(s.render, 'dante-slotlab.kept'), '0x105 0x01000400 0\n');
+        const p = await start(s);
+        await until(() => /panel_take_over_stock = 1/.test(fs.readFileSync(s.conf, 'utf8')), 'take-over added');
+        assert(/^guide_hold = 0\n/.test(fs.readFileSync(s.conf, 'utf8')), 'the owner\'s line went');
+        assert.strictEqual(state(s).mode, 'kept');
+        assert.strictEqual(restarts(s), 1);
+        p.kill();
+        await wait(100);
+        const q = await start(s);
+        await wait(200);
+        assert.strictEqual(restarts(s), 1, 'upgraded twice');
+        q.kill();
+    }],
     ['anything else is refused, nothing is written, nothing runs', async () => {
         const s = withCounter(sandbox());
         const p = await start(s);

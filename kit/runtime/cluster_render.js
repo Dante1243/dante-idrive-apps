@@ -150,7 +150,12 @@ class ClusterRender extends EventEmitter {
     status() { return this.ready ? this._send({ op: 'status' }) : false; }
 
     /* ---------- public layer API ---------- */
-    /** Create an image layer; returns a client-chosen ref. opts: target,x,y,w,h,[iw,ih,klass,z,visible,sampling]. */
+    /**
+     * Create an image layer; returns a client-chosen ref. opts: target,x,y,w,h,[iw,ih,klass,z,visible,sampling,contend].
+     * contend: keep asking for the slot when the stock HMI has it, and on a target set to take over
+     * from the stock HMI (`<target>_take_over_stock`), move its content aside. Without it a layer
+     * waits until the slot is free, which a slot the stock HMI shows something in never is.
+     */
     image(opts) {
         opts = opts || {};
         const ref = this._nextRef++;
@@ -164,6 +169,7 @@ class ClusterRender extends EventEmitter {
             visible: opts.visible === false || opts.visible === 0 ? 0 : 1,
         };
         if (opts.z != null) o.z = opts.z;
+        if (opts.contend) o.contend = 1;
         this._layers.set(ref, { opts: o, px: null });
         if (this.ready) this._send(Object.assign({ op: 'layer', ref }, o));
         return ref;

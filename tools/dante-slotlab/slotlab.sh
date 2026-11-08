@@ -40,7 +40,12 @@ others() {
     return 0
 }
 
-# write_conf [kind slot scene class]: our block replaced, or gone with no arguments
+# write_conf [kind slot scene class]: our block replaced, or gone with no arguments.
+# A kept slot takes over from the stock HMI: the KOMBI never takes a slot from the content it shows,
+# so once the icon has hidden and the stock content (an M badge, say) is back in the slot, the icon
+# could never show there again until a restart. With take-over, cluster-render moves the stock
+# content aside for a layer that contends (Warm-Up's icon does), and the KOMBI puts it back when the
+# icon goes. A trial does not: it is there to see what shares the slot, not to push anything out.
 write_conf() {
     tmp=$CONF.lab
     others > "$tmp" || return 1
@@ -50,6 +55,7 @@ write_conf() {
             echo "panel_slot = $2"
             echo "panel_scene_id = $3"
             echo "panel_content_class = $4"
+            if [ "$1" = kept ]; then echo "panel_take_over_stock = 1"; fi
             echo "$END"
         } >> "$tmp" || return 1
     fi
@@ -121,6 +127,7 @@ handle() {
                 echo "$slot $scene $class" > "$KEPT"
                 write_conf kept "$slot" "$scene" "$class"
                 mode=kept; deadline=0; msg=
+                restart_render              # the kept block adds take-over, which the trial ran without
             fi
             ;;
         revert) if [ "$mode" = trial ]; then fall_back; msg=; fi ;;
@@ -168,6 +175,10 @@ if [ -f "$CONF" ] && grep -q "^$BEGIN trial" "$CONF"; then
     fall_back
 elif [ -n "$kslot" ]; then
     mode=kept; slot=$kslot; scene=$kscene; class=$kclass
+    # a slot kept by 1.0.0 has no take-over: write it as this version does, once
+    if [ -f "$CONF" ] && ! sed -n "/^$BEGIN kept/,/^$END/p" "$CONF" | grep -q '^panel_take_over_stock = 1'; then
+        write_conf kept "$kslot" "$kscene" "$kclass" && restart_render
+    fi
 fi
 
 trap 'exit 0' TERM INT

@@ -64,13 +64,13 @@ mgu.run({
         // the DME's own exhaust temperatures (dme_exhaust.js) correct the model's gas temperature; what
         // that has taught it belongs to this engine and its tune, so it is kept between drives
         const dme = new DmeExhaust({ signals: ctx.signals, log: ctx.log });
-        const LEARNED = path.join(ctx.dataDir || '.', 'dme_learned.json');
+        const LEARNED = ctx.dataDir ? path.join(ctx.dataDir, 'dme_learned.json') : null;
         try {
             const v = JSON.parse(fs.readFileSync(LEARNED, 'utf8'));
             if (Array.isArray(v.learn) && v.learn.length === turbo.learn.length && v.learn.every(G.isNum)) turbo.learn = v.learn;
-        } catch (e) { /* first drive */ }
+        } catch (e) { /* first drive, or nowhere to keep it */ }
         let learnedSaved = 0;
-        const saveLearned = () => { try { fs.writeFileSync(LEARNED, JSON.stringify({ learn: turbo.learn.map((x) => Math.round(x * 10) / 10) })); } catch (e) { ctx.log.warn('save learned: ' + e); } };
+        const saveLearned = () => { if (LEARNED) try { fs.writeFileSync(LEARNED, JSON.stringify({ learn: turbo.learn.map((x) => Math.round(x * 10) / 10) })); } catch (e) { ctx.log.warn('save learned: ' + e); } };
         process.on('exit', () => { if (learnedSaved) saveLearned(); });
 
         /* ---------- cluster badge: oil telltale on the instrument cluster ---------- */
@@ -83,7 +83,9 @@ mgu.run({
         const geom = () => ({ x: settings.get('clusterX'), y: settings.get('clusterY'), size: settings.get('clusterSize') });
         function badgeApply() {
             const on = settings.get('clusterBadge') || forced(), g = geom();
-            if (on && !badge) badge = new ClusterBadge({ app: 'warmup', x: g.x, y: g.y, size: g.size, log: ctx.log });
+            // switched (back) on: a fresh start for the brief mode, or an icon already shown its
+            // 10 s this warm-up would stay hidden and look broken
+            if (on && !badge) { badge = new ClusterBadge({ app: 'warmup', x: g.x, y: g.y, size: g.size, log: ctx.log }); briefState = 'off'; }
             else if (!on && badge) { badge.close(); badge = null; }
             else if (badge) badge.setGeometry(g.x, g.y, g.size);      // live-tune position / size
             if (badge) badge.setTestCard(!!lab.trial);
