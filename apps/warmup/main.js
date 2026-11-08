@@ -145,6 +145,13 @@ mgu.run({
             if (lab.trial) {
                 if (!parked(d)) { lab.abort('Stopped: the car moved'); badgeApply(); } else if (m - lastKeep > LAB_KEEP_MS) { lastKeep = m; lab.keepAlive(); }
             }
+            clusterTick(d, m);
+        }, () => { hist.length = 0; thist.length = 0; turbo.reset(); if (badge) badge.setState('off'); });
+
+        // The Test icon's end and the icon's state also run on a clock and on every frame, not only on the
+        // car's samples: parked with the engine off the car sends next to none, and the Test icon then
+        // never ended ("Watching" stuck, the icon forced on).
+        function clusterTick(d, m) {
             if (test && m - test.at > TEST_MS) {
                 lab.refresh();
                 lab.finding = explain(test.before, snapshot(lab.slots), lab.seen);
@@ -153,7 +160,9 @@ mgu.run({
             }
             // cluster telltale: cold below the warm threshold, hot at/above the hot threshold
             if (badge) badge.setState(forced() ? 'cold' : held(clusterState(d), m));
-        }, () => { hist.length = 0; thist.length = 0; turbo.reset(); if (badge) badge.setState('off'); });
+        }
+        const clusterTimer = setInterval(() => clusterTick(car.data(), mono()), 1000);
+        if (clusterTimer.unref) clusterTimer.unref();
 
         const F = () => settings.get('tempUnit') === 'f';
         const T = (c) => (G.isNum(c) ? (F() ? c * 9 / 5 + 32 : c) : null);
@@ -483,6 +492,7 @@ mgu.run({
 
         function render() {
             const t = ctx.theme(), d = car.data(), now = Date.now();
+            clusterTick(d, mono());
             const cv = ctx.canvas(W, H).clear(t.bg);
             if (page === 1) drawTurbo(cv, t, d); else if (page === 2) drawCluster(cv, t, d); else drawWarm(cv, t, d, now);
             G.frame(cv, t, PAGES, page, [d.demo && { text: 'DEMO' }]);     // G20-style frame

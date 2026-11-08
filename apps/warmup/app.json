@@ -2,7 +2,7 @@
   "id": "warmup",
   "title": "Warm-Up",
   "description": "Oil and coolant warm-up (time to ready), safe rev limit, a live turbo and downpipe heat balance, and an oil icon on the cluster",
-  "version": "1.11.1",
+  "version": "1.11.2",
   "vendor": "dante",
   "loggingId": "OA9A",
   "iconGlyph": "temp",

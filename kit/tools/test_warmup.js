@@ -221,6 +221,18 @@ const checks = [
         assert(badges[0].closed, 'the badge should go again');
         assert((await render()).some((x) => /slot table/i.test(x)), 'the finding should show');
     }],
+    ['Test icon ends on time with the engine off, when the car sends no samples', async () => {
+        await start({ clusterBadge: false });
+        drive(IDLE, 1);
+        await tab(2);
+        await clicks.BTN_TEST();
+        await render();
+        assert.strictEqual(badges[0].state, 'cold', 'the icon should be up without a new sample');
+        mono += 8000; wall += 8000;                       // 8 s pass, not one sample
+        const t = await render();
+        assert(badges[0].closed, 'the test never ended: the icon stays forced on');
+        assert(!t.includes('Watching'), '"Watching" stuck: ' + t.join(' | '));
+    }],
 ];
 
 (async () => {
