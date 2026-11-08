@@ -98,7 +98,8 @@ const checks = [
         lab.next(true);
         assert.strictEqual(asked(), 'try 0x203 0x010004f0 0 120');
         lab.next(true); lab.next(true);
-        assert.strictEqual(asked(), 'try 0x101 0x01000400 0 120');
+        // another slot: the guide hold's scene id, not the panel's (the HUD target shares that)
+        assert.strictEqual(asked(), 'try 0x101 0x010004f1 0 120');
         assert(lab.keep());
         assert.strictEqual(asked(), 'keep');
         assert.strictEqual(lab.trial, null);
@@ -288,6 +289,33 @@ const shellChecks = [
         await wait(200);
         assert.strictEqual(restarts(s), 1, 'upgraded twice');
         q.kill();
+    }],
+    ['a slot kept with the panel\'s scene id (shared with the HUD target) moves to the guide hold\'s, once', async () => {
+        const s = withCounter(sandbox());
+        fs.writeFileSync(s.conf, 'guide_hold = 0\n# dante-slotlab begin kept\npanel_slot = 0x105\npanel_scene_id = 0x01000400\npanel_content_class = 0\npanel_take_over_stock = 1\n# dante-slotlab end\n');
+        fs.writeFileSync(path.join(s.render, 'dante-slotlab.kept'), '0x105 0x01000400 0\n');
+        const p = await start(s);
+        await until(() => /panel_scene_id = 0x010004f1/.test(fs.readFileSync(s.conf, 'utf8')), 'scene id moved');
+        assert.strictEqual(fs.readFileSync(path.join(s.render, 'dante-slotlab.kept'), 'utf8').trim(), '0x105 0x010004f1 0');
+        assert.strictEqual(state(s).scene, '0x010004f1');
+        assert(/^guide_hold = 0\n/.test(fs.readFileSync(s.conf, 'utf8')));
+        assert.strictEqual(restarts(s), 1);
+        p.kill();
+        await wait(100);
+        const q = await start(s);
+        await wait(200);
+        assert.strictEqual(restarts(s), 1, 'moved twice');
+        q.kill();
+    }],
+    ['the stock slot kept with the panel\'s scene id stays as it is', async () => {
+        const s = withCounter(sandbox());
+        fs.writeFileSync(s.conf, '# dante-slotlab begin kept\npanel_slot = 0x203\npanel_scene_id = 0x01000400\npanel_content_class = 512\npanel_take_over_stock = 1\n# dante-slotlab end\n');
+        fs.writeFileSync(path.join(s.render, 'dante-slotlab.kept'), '0x203 0x01000400 512\n');
+        const p = await start(s);
+        await wait(200);
+        assert(/panel_scene_id = 0x01000400/.test(fs.readFileSync(s.conf, 'utf8')));
+        assert.strictEqual(restarts(s), 0);
+        p.kill();
     }],
     ['anything else is refused, nothing is written, nothing runs', async () => {
         const s = withCounter(sandbox());

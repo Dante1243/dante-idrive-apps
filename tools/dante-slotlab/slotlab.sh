@@ -174,9 +174,19 @@ load_kept
 if [ -f "$CONF" ] && grep -q "^$BEGIN trial" "$CONF"; then
     fall_back
 elif [ -n "$kslot" ]; then
+    # a slot kept outside the stock one with the panel's own scene id (Slot Lab 1.0 and 1.1): that id is
+    # cluster-render's HUD target's too, so an app drawing on the HUD held the icon back. It moves to the
+    # guide hold's id, which Warm-Up's trials of other slots use now.
+    if [ "$kscene" = 0x01000400 ] && [ "$kslot" != 0x203 ]; then
+        kscene=0x010004f1
+        echo "$kslot $kscene $kclass" > "$KEPT"
+    fi
     mode=kept; slot=$kslot; scene=$kscene; class=$kclass
-    # a slot kept by 1.0.0 has no take-over: write it as this version does, once
-    if [ -f "$CONF" ] && ! sed -n "/^$BEGIN kept/,/^$END/p" "$CONF" | grep -q '^panel_take_over_stock = 1'; then
+    # a block written by an older version (no take-over, or the old scene id): written as this one does, once
+    block=
+    if [ -f "$CONF" ]; then block=$(sed -n "/^$BEGIN kept/,/^$END/p" "$CONF"); fi
+    if ! printf '%s\n' "$block" | grep -q '^panel_take_over_stock = 1$' \
+        || ! printf '%s\n' "$block" | grep -q "^panel_scene_id = $kscene\$"; then
         write_conf kept "$kslot" "$kscene" "$kclass" && restart_render
     fi
 fi

@@ -37,7 +37,15 @@ class FakeBadge {
     setGeometry() {}
     close() { this.closed = true; }
 }
-const stubs = { './kit/mgu': { run(a) { app = a; } }, './kit/car': FakeCar, './cluster_badge': { ClusterBadge: FakeBadge } };
+// cluster-render's status, as its 'status' op answers: what the Cluster page reads
+let crStatus = '';
+class FakeCR {
+    constructor() { this.fns = {}; }
+    on(ev, fn) { this.fns[ev] = fn; return this; }
+    connect() { return this; }
+    status() { if (this.fns.status) this.fns.status(crStatus); return true; }
+}
+const stubs = { './kit/mgu': { run(a) { app = a; } }, './kit/car': FakeCar, './cluster_badge': { ClusterBadge: FakeBadge }, './kit/cluster_render': { ClusterRender: FakeCR } };
 const load = Module._load;
 Module._load = function (req, parent, isMain) {
     if (stubs[req]) return stubs[req];
@@ -220,6 +228,21 @@ const checks = [
         drive(IDLE, 5);
         assert(badges[0].closed, 'the badge should go again');
         assert((await render()).some((x) => /slot table/i.test(x)), 'the finding should show');
+    }],
+    ['the Cluster page names the target that has the icon\'s scene id (the HUD)', async () => {
+        crStatus = 'target map: slot 0x100 scene 0x10004f0 1088x480: idle\n'
+            + 'target panel: slot 0x105 scene 0x1000400 1920x720: waiting; scene id in use by another target\n'
+            + 'target hud: slot 0x323 scene 0x1000400 800x480: shown (us); verified\n';
+        await start({ clusterBadge: true });
+        drive(IDLE, 1);
+        await tab(2);
+        await render(); mono += 3000; await render();
+        const t = await render();
+        assert(t.some((x) => /the hud target has its scene id \(shown/.test(x)), 'not named: ' + t.join(' | '));
+        crStatus = 'target panel: slot 0x105 scene 0x1000400 1920x720: shown (us); verified\n';
+        mono += 3000; await render();
+        assert((await render()).some((x) => x === 'slot 0x105: shown (us)'));
+        crStatus = '';
     }],
     ['Test icon ends on time with the engine off, when the car sends no samples', async () => {
         await start({ clusterBadge: false });

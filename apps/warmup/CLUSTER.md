@@ -102,6 +102,21 @@ Safety:
 - It touches only its own block in `cluster-render.local.conf`, and takes it out when removed.
 - Each trial restarts cluster-render, so anything else drawing through it (the Waze map) blinks.
 
+### The icon's own scene id
+
+cluster-render gives its `panel` target (the icon) and its `hud` target the same scene id, 0x01000400,
+and two targets with one scene id cannot both be up. So any app drawing on the HUD (Redline's
+experimental HUD, Waze's HUD mode) kept the icon off the cluster, which the Cluster page showed as
+"waiting: scene id in use by another target". From Slot Lab 1.2.0 a kept slot other than the stock
+one uses the guide hold's id, 0x010004f1, and Warm-Up 1.11.3's trials of other slots do too; a slot
+kept with the old id is moved over the next time the tool starts. That id is only taken while
+cluster-render holds BMW's guidance box for Waze on the cluster. The Cluster page names the target
+when one has the icon's id.
+
+On a G20 330i, 0x105 is also where the cluster draws its own M badge. That badge is not head-unit
+content, so nothing here can take it away: the icon only shows there when it asks before the cluster
+draws the badge (after a head-unit restart).
+
 ### A kept slot takes over, so the icon comes back
 
 A slot that looks free when you try it often is not free for good. On a G20 330i, 0x105 is where the

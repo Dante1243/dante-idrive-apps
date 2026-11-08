@@ -463,7 +463,7 @@ mgu.run({
             const rp = G.panel(cv, t, 928, 44, 648, 468, null);
             const panel = lab.status.targets.panel;
             cv.text('OIL ICON', 952, 86, 22, t.dim, { font: 'bold', spacing: 1.5 });
-            cv.text(panel ? 'slot ' + hex(panel.slot) + ': ' + panel.state.split(';')[0] : 'cluster-render not answering', 1552, 86, 24, panel ? t.text : t.warn, { align: 'right', font: 'bold' });
+            cv.text(iconStatus(panel, lab.status.targets), 952, 116, 22, panel ? t.text : t.warn, { font: 'bold' });
             // long lines go over two rows
             const wrap = (s, y, size, c) => {
                 const words = String(s).split(' ');
@@ -473,8 +473,8 @@ mgu.run({
                 });
                 if (line) cv.text(line, 952, y + n * (size + 8), size, c);
             };
-            cv.text('WHAT THE ICON DOES', 952, 134, 22, t.dim, { font: 'bold', spacing: 1.5 });
-            wrap(lab.finding || 'Play music so the widget is up, then press Test icon.', 170, 24, lab.finding ? t.text : t.dim);
+            cv.text('WHAT THE ICON DOES', 952, 158, 22, t.dim, { font: 'bold', spacing: 1.5 });
+            wrap(lab.finding || 'Play music so the widget is up, then press Test icon.', 192, 24, lab.finding ? t.text : t.dim);
 
             cv.text('SLOT LAB', 952, 262, 22, t.dim, { font: 'bold', spacing: 1.5 });
             let lines;
@@ -488,6 +488,21 @@ mgu.run({
             G.button(cv, t, 952, by, 186, 52, busy ? 'Watching' : 'Test icon', startTest, { key: 'test', busy, primary: true });
             G.button(cv, t, 1150, by, 186, 52, 'Next slot', nextSlot, { key: 'next', busy: !parked(d) || !lab.tool });
             G.button(cv, t, 1348, by, 204, 52, lab.trial ? 'Keep this' : 'Stock', lab.trial ? keepSlot : () => { lab.stock(); badgeApply(); return render(); }, { key: 'keep', busy: !lab.tool });
+        }
+
+        /**
+         * The panel target's state as cluster-render gives it, and, when it waits because its scene id is
+         * taken, which target has it: panel and hud share 0x01000400 by default, so an app drawing on the
+         * HUD (Redline's HUD, Waze on the HUD) keeps the icon off the cluster.
+         */
+        function iconStatus(panel, targets) {
+            if (!panel) return 'cluster-render not answering';
+            let s = 'slot ' + hex(panel.slot) + ': ' + panel.state.split(';')[0];
+            if (/scene id in use/.test(panel.state)) {
+                const by = Object.keys(targets).find((n) => n !== 'panel' && targets[n].scene === panel.scene && !/^(idle|unavailable)/.test(targets[n].state));
+                s = 'waiting: the ' + (by || 'another') + ' target has its scene id' + (by ? ' (' + targets[by].state.split(';')[0] + ')' : '');
+            }
+            return s.length > 52 ? s.slice(0, 51) + '...' : s;
         }
 
         function render() {

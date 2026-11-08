@@ -35,7 +35,7 @@ const hex = (n, w) => '0x' + Number(n).toString(16).padStart(w || 3, '0');
 const CONTENT = {
     0x1000210: 'BMW HUD guidance', 0x1000251: 'BMW HUD pop-up', 0x1000300: 'BMW map', 0x1000310: 'BMW turn box',
     0x1000314: 'BMW reduced box', 0x1000351: 'BMW pop-up', 0x1000400: 'Panel or speech dialog', 0x10004f0: 'Map layer',
-    0x10004f1: 'Guide hold',
+    0x10004f1: 'Oil icon or guide hold',
 };
 const OURS = [0x1000400, 0x10004f0, 0x10004f1];
 const STATUS = ['disabled', 'free', 'occupied'];
@@ -115,7 +115,10 @@ function candidates(slots) {
         const stock = Array.from(s.rows.values()).some((r) => r.map !== 0 && OURS.indexOf(r.content) < 0);
         if (s.slot !== STOCK_SLOT && s.status !== 0 && !stock) free.push(s.slot);
     });
-    free.sort((a, b) => a - b).forEach((slot) => list.push({ slot, scene: SCENE_PANEL, cls: 0, why: slot >= 0x300 ? 'Free HUD slot' : 'Free cluster slot' }));
+    // another slot goes with the guide hold's scene id: the panel's (0x01000400) is the HUD target's too in
+    // cluster-render, so any app drawing on the HUD would hold the icon back ("scene id in use by another
+    // target", seen on a G20). The hold's id is only taken while a guide hold is up (Waze on the cluster).
+    free.sort((a, b) => a - b).forEach((slot) => list.push({ slot, scene: SCENE_HOLD, cls: 0, why: slot >= 0x300 ? 'Free HUD slot' : 'Free cluster slot' }));
     return list;
 }
 
