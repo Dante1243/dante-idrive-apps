@@ -1,0 +1,53 @@
+{
+  "id": "e85",
+  "title": "E85 Blend",
+  "description": "The ethanol content in your tank from the fills you book and the car's own tank level, and how many litres of E85 or 98 hit your target: a top-up or a full tank, step by step at the pump",
+  "version": "1.0.0",
+  "vendor": "dante",
+  "loggingId": "OAA1",
+  "iconGlyph": "e85",
+  "signals": {
+    "com.harman.infotainment.systemfunctions.tasu.tasu.InternalTasu": {
+      "_instances": "SystemFunctionsInternalTasuInst1",
+      "_methods": ["sendTasuRequest"],
+      "_broadcasts": ["sendTasuResponse"]
+    },
+    "de.bmw.infotainment.KombiIF": {
+      "statusRangeTankStatus": "rs"
+    }
+  },
+  "screens": [
+    {
+      "name": "MAIN",
+      "kind": "canvas",
+      "title": "E85 Blend",
+      "buttons": [
+        ["BTN_TGT_DN", "Target -5"],
+        ["BTN_TGT_UP", "Target +5"],
+        ["BTN_FULL", "Full tank"],
+        ["BTN_DONE", "Done"],
+        ["BTN_PAGE", "Next page"],
+        ["BTN_PREV", "Previous page"],
+        ["BTN_SETTINGS", "Settings"]
+      ]
+    }
+  ],
+  "settings": [
+    {"key": "target", "label": "Target ethanol content", "type": "number", "unit": "%", "default": 30,
+     "steps": [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85]},
+    {"key": "e85Pct", "label": "Ethanol in your E85", "type": "number", "unit": "%", "default": 85,
+     "steps": [65, 70, 75, 80, 85]},
+    {"key": "petrolPct", "label": "Ethanol in your 98", "type": "number", "unit": "%", "default": 0,
+     "steps": [0, 5, 10]},
+    {"key": "tankL", "label": "Tank size", "type": "number", "unit": "l", "default": 59,
+     "steps": [40, 50, 52, 57, 59, 60, 63, 66, 68, 74]},
+    {"key": "theme", "label": "Colour theme", "type": "choice", "default": "m_tricolour",
+     "options": [["m_red", "M Red"], ["m_tricolour", "M Tricolour"], ["ice", "Ice White"], ["amber", "Night Amber"]]},
+    {"key": "layout", "label": "Screen layout", "type": "choice", "default": "full",
+     "options": [["full", "Full screen"], ["standard", "Standard"]]},
+    {"key": "renderer", "label": "Renderer", "type": "choice", "default": "auto",
+     "options": [["auto", "GPU 60 fps (default)"], ["software", "Software"]]},
+    {"key": "demo", "label": "Demo data", "type": "choice", "default": "auto",
+     "options": [["auto", "Auto"], ["on", "Always"], ["off", "Never"]]}
+  ]
+}
