@@ -11,8 +11,10 @@
  *     actually went in
  *
  *   Refuels page
- *   - log any fill: the fuel and the pump's litres (it offers the rise it saw in the tank), every fill
- *     with the tank's content before and after, and "the tank is all 98 / E85" to start over
+ *   - Start filling 98 / E85 / E10: the car measures the fill (the tank's litres before, and once Done
+ *     filling has settled, after), and books it by itself
+ *   - or the pump's litres, for a fill the car did not see (it offers the rise it saw in the tank)
+ *   - every fill with the tank's content before and after, Undo last, and "all 98 / E85" to start over
  *
  * No ethanol sensor: the content is only as right as the fills booked. Driving does not change it.
  * Saved in data/e85.json.
@@ -64,10 +66,11 @@ mgu.run({
         // the tank going up by itself is a fill to log; going down (driving) just moves the mark
         function watchLevel(now) {
             const r = read(now);
-            if (r.demo || !r.settled || r.s.book.fill) return;
+            if (r.demo || !r.settled || r.s.book.fill || r.s.book.track) return;
             if (r.s.lastV === null || r.v < r.s.lastV) { r.s.lastV = r.v; save(); }
         }
-        const rise = (r) => (r.v !== null && r.s.lastV !== null && r.v - r.s.lastV >= RISE_L ? r.v - r.s.lastV : 0);
+        // (not while a fill is being made here: that one books itself)
+        const rise = (r) => (!r.s.book.track && !r.s.book.fill && r.v !== null && r.s.lastV !== null && r.v - r.s.lastV >= RISE_L ? r.v - r.s.lastV : 0);
 
         /* ---------- the guided fill ---------- */
         let poured = null;            // the Done figure: starts at the plan, +/- to the pump's
@@ -109,6 +112,35 @@ mgu.run({
             r.s.lastV = vAfter; logL = null;
             say('Booked ' + L.toFixed(1) + ' l of ' + logFuel + ': tank now ' + E(e));
             if (!r.demo) save();
+            return render();
+        }
+        /* ---------- a fill the car measures ---------- */
+        function trackStart() {
+            const r = read(Date.now());
+            if (r.v === null) { say('No tank reading yet'); return render(); }
+            r.s.book.trackStart(logFuel, r.v);
+            if (!r.demo) save();
+            return render();
+        }
+        function trackDone() { const r = read(Date.now()); r.s.book.trackDone(); if (!r.demo) save(); return render(); }
+        function trackCancel() { const r = read(Date.now()); r.s.book.trackCancel(); if (!r.demo) save(); return render(); }
+        /** Each reading: a finished measured fill is booked once the level has settled higher. */
+        function trackTick(now) {
+            const r = read(now), k = r.s.book.track;
+            if (!k) return;
+            if (r.demo && !k.done) demo.v = Math.min(cap(), demo.v + 0.25);       // the demo pump runs at 0.5 l/s
+            const res = r.s.book.trackFeed({ v: r.v, settled: r.settled }, ef(k.fuel));
+            if (!res) return;
+            r.s.lastV = r.v;
+            if (!r.demo) save();
+            say('Booked ' + res.booked.litres.toFixed(1) + ' l of ' + res.booked.fuel + ': tank now ' + E(res.booked.eAfter));
+            render();
+        }
+        function undo() {
+            const r = read(Date.now()), x = r.s.book.undo();
+            if (!x) return render();
+            if (!r.demo) save();
+            say(x.reset ? 'Took back the reset: tank ' + E(r.s.book.e) : 'Took back ' + x.litres.toFixed(1) + ' l of ' + x.fuel + ': tank ' + E(r.s.book.e));
             return render();
         }
         function setAll(fuel) { return () => { const r = read(Date.now()); r.s.book.reset(ef(fuel)); if (r.v !== null) r.s.lastV = r.v; if (!r.demo) save(); say('Tank set to all ' + fuel); return render(); }; }
@@ -204,20 +236,36 @@ mgu.run({
         /* ---------- Refuels page ---------- */
         function drawLog(cv, t, r) {
             G.panel(cv, t, 24, 44, 560, 468, 'Log a fill');
-            const x = 48, up = rise(r);
-            cv.text(up ? 'The tank went up ' + up.toFixed(1) + ' l. What went in?' : 'A fill made without the Blend page:', x, 108, 22, up ? t.warn : t.dim, { font: 'bold' });
-            const fw = (512 - 2 * 10) / 3;
-            FUELS.forEach((f, i) => G.button(cv, t, x + i * (fw + 10), 128, fw, 52, f, () => { logFuel = f; return render(); }, { key: 'lf' + f, primary: logFuel === f }));
-            const L = logL === null ? round1(up) : logL;
-            cv.text('LITRES (THE PUMP\'S FIGURE)', x, 222, 20, t.dim, { font: 'bold', spacing: 1.5 });
-            cv.text(L1(L), x + 512, 222, 30, t.text, { align: 'right', font: 'num' });
-            const nb = (512 - 3 * 10) / 4;
-            [[-10, '-10'], [-1, '-1'], [1, '+1'], [10, '+10']].forEach(([d, l], i) => G.button(cv, t, x + i * (nb + 10), 240, nb, 48, l, () => { logL = Math.max(0, round1((logL === null ? L : logL) + d)); return render(); }, { key: 'l' + i }));
-            [[-0.1, '-0.1'], [0.1, '+0.1']].forEach(([d, l], i) => G.button(cv, t, x + i * (nb + 10), 298, nb, 48, l, () => { logL = Math.max(0, round1((logL === null ? L : logL) + d)); return render(); }, { key: 'ls' + i }));
-            if (r.v !== null && L > 0) cv.text('tank then ' + E(mix(Math.max(0, r.v - L), r.s.book.e, L, ef(logFuel))), x + 512, 330, 22, t.dim, { align: 'right' });
-            G.button(cv, t, x, 372, 512, 54, 'Book this fill', saveLog, { key: 'book', primary: true, busy: !(L > 0) });
-            G.button(cv, t, x, 440, 250, 48, 'Tank all 98', setAll('98'), { key: 'all98', confirm: true });
-            G.button(cv, t, x + 262, 440, 250, 48, 'Tank all E85', setAll('E85'), { key: 'allE85', confirm: true });
+            const x = 48, w = 512, b = r.s.book, k = b.track;
+            // a fill the car measures: the level when it starts, and after
+            if (k) {
+                const so = r.v === null ? null : r.v - k.v0;
+                cv.text((k.done ? 'MEASURING ' : 'FILLING ') + k.fuel, x, 108, 22, k.fuel === 'E85' ? ETH : t.accent2 || t.accent, { font: 'bold', spacing: 1.5 });
+                cv.text(k.v0.toFixed(1) + ' l  >  ' + (r.v === null ? '--' : r.v.toFixed(1) + ' l'), x, 152, 30, t.text, { font: 'bold' });
+                cv.text(so === null ? '' : (so >= 0 ? '+' : '') + so.toFixed(1) + ' l', x + w, 152, 30, so > 0 ? GO : t.dim, { align: 'right', font: 'num' });
+                const note = k.done ? (r.settled ? 'Waiting for the tank to read higher (ignition on)' : 'Waiting for the level to settle') : 'Pump, then press Done filling';
+                cv.text(note, x, 180, 20, t.dim);
+                if (!k.done) G.button(cv, t, x, 192, w - 150 - 12, 52, 'Done filling', trackDone, { key: 'tdone', primary: true, color: GO });
+                G.button(cv, t, k.done ? x : x + w - 150, 192, k.done ? w : 150, 52, 'Cancel', trackCancel, { key: 'tcancel' });
+            } else {
+                const up = rise(r);
+                cv.text(up ? 'The tank went up ' + up.toFixed(1) + ' l. What went in?' : 'What are you filling with?', x, 108, 22, up ? t.warn : t.dim, { font: 'bold' });
+                const fw = (w - 2 * 10) / 3;
+                FUELS.forEach((f, i) => G.button(cv, t, x + i * (fw + 10), 124, fw, 52, f, () => { logFuel = f; return render(); }, { key: 'lf' + f, primary: logFuel === f }));
+                G.button(cv, t, x, 188, w, 54, 'Start filling ' + logFuel, trackStart, { key: 'tstart', primary: true, color: GO, busy: r.v === null || !!b.fill });
+            }
+            // or the pump's litres, for a fill the car did not see
+            const up = rise(r), L = logL === null ? round1(up) : logL, y = 272;
+            cv.text('OR BY THE PUMP\'S LITRES', x, y, 20, t.dim, { font: 'bold', spacing: 1.5 });
+            cv.text(L1(L), x + w, y, 28, t.text, { align: 'right', font: 'num' });
+            const nb = (w - 5 * 8) / 6;
+            [[-10, '-10'], [-1, '-1'], [-0.1, '-.1'], [0.1, '+.1'], [1, '+1'], [10, '+10']].forEach(([d, l], i) => G.button(cv, t, x + i * (nb + 8), y + 14, nb, 44, l, () => { logL = Math.max(0, round1((logL === null ? L : logL) + d)); return render(); }, { key: 'l' + i }));
+            const after = r.v !== null && L > 0 ? ', tank then ' + E(mix(Math.max(0, r.v - L), b.e, L, ef(logFuel))) : '';
+            G.button(cv, t, x, y + 70, w, 48, 'Book ' + (L > 0 ? L.toFixed(1) + ' l of ' : '') + logFuel + after, saveLog, { key: 'book', busy: !(L > 0) || !!k });
+            const bw3 = (w - 2 * 8) / 3;
+            G.button(cv, t, x, 448, bw3, 44, 'Undo last', undo, { key: 'undo', confirm: true, busy: !b.log.length });
+            G.button(cv, t, x + bw3 + 8, 448, bw3, 44, 'All 98', setAll('98'), { key: 'all98', confirm: true });
+            G.button(cv, t, x + 2 * (bw3 + 8), 448, bw3, 44, 'All E85', setAll('E85'), { key: 'allE85', confirm: true });
         }
 
         function drawHistory(cv, t, r) {
@@ -232,7 +280,7 @@ mgu.run({
                 if (x.reset) cv.text('set to ' + E(x.eAfter), cols[1], y, 22, t.dim);
                 else {
                     cv.text(x.fuel, cols[1], y, 22, x.fuel === 'E85' ? ETH : t.text, { font: 'bold' });
-                    cv.text(x.litres.toFixed(1) + ' l', cols[2], y, 22, t.text);
+                    cv.text(x.litres.toFixed(1) + ' l' + (x.measured ? ' (car)' : ''), cols[2], y, 22, t.text);
                     cv.text(x.vAfter.toFixed(1) + ' l', cols[3], y, 22, t.dim);
                     cv.text(E(x.eBefore) + '  >  ' + E(x.eAfter), cols[4], y, 22, t.text, { font: 'bold' });
                 }
@@ -271,7 +319,7 @@ mgu.run({
         const st0 = real.book.step();
         if (st0) poured = round1(st0.litres);
 
-        setInterval(() => { const now = Date.now(); tank.tick(now); watchLevel(now); }, 500);
+        setInterval(() => { const now = Date.now(); tank.tick(now); watchLevel(now); trackTick(now); }, 500);
         ctx.loop('MAIN', 4, render);
         render().then(() => log.info('first frame done')).catch((e) => log.warn('first render: ' + e));
     },

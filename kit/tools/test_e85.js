@@ -113,6 +113,38 @@ const checks = [
         assert.deepStrictEqual(b2.step(), s1);
         assert(b2.done(s1.litres).fuel === 'E85');
     }],
+    ['a fill the car measures: level before, Done, booked once it settles higher', () => {
+        const b = new Book({ e: 0.30, known: true });
+        b.trackStart('98', 20.5);
+        assert.strictEqual(b.trackFeed({ v: 32, settled: true }, 0), null, 'booked before Done filling');
+        b.trackDone();
+        assert.strictEqual(b.trackFeed({ v: 40, settled: false }, 0), null, 'booked while still moving');
+        assert.strictEqual(b.trackFeed({ v: 21, settled: true }, 0), null, 'booked a gauge that has not caught up');
+        const res = b.trackFeed({ v: 45.5, settled: true }, 0);
+        assert(res && res.booked.measured);
+        near(res.booked.litres, 25, 1e-9, 'litres');
+        near(b.e, 20.5 * 0.30 / 45.5, 1e-9, 'tank after');
+        assert.strictEqual(b.track, null);
+        assert.strictEqual(b.trackFeed({ v: 50, settled: true }, 0), null, 'booked twice');
+    }],
+    ['a measured fill survives the app closing between Start and Done', () => {
+        const b = new Book({ e: 0, known: true });
+        b.trackStart('E85', 10);
+        const b2 = new Book(JSON.parse(JSON.stringify(b)));
+        b2.trackDone();
+        near(b2.trackFeed({ v: 30, settled: true }, 0.85).booked.eAfter, 20 * 0.85 / 30, 1e-9, 'after');
+    }],
+    ['undo takes the last fill back out, and a reset too', () => {
+        const b = new Book({ e: 0.1, known: false });
+        b.refuel({ fuel: 'E85', litres: 10, vAfter: 40, eFuel: 0.85 });
+        b.undo();
+        near(b.e, 0.1, 1e-12, 'after undoing the fill');
+        assert.strictEqual(b.log.length, 0);
+        b.reset(0.85);
+        b.undo();
+        assert.strictEqual(b.e, 0.1); assert.strictEqual(b.known, false);
+        assert.strictEqual(b.undo(), null);
+    }],
     ['the tank reads only, and the halves are 0.5 l', () => {
         for (const c of LEFT.concat(RIGHT, WHOLE)) check(0x12, 0x22, [parseInt(c.did.slice(0, 2), 16), parseInt(c.did.slice(2), 16)], false);
         assert.strictEqual(LEFT[0].factor, 0.5); assert.strictEqual(RIGHT[0].factor, 0.5);

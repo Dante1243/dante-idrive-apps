@@ -14,10 +14,13 @@
  *   const b = new Book(saved)                   // { e, set, log }: the tank's book, saved by the app
  *   b.refuel({ fuel, litres, vAfter, eFuel })   // mixes a fill in; vAfter = the tank after it
  *   b.start / b.done(poured, vNow) / b.cancel   // the guided fill at the pump (see Book below)
+ *   b.trackStart / trackDone / trackFeed        // a fill the car measures: the level before and after
+ *   b.undo()                                    // the last fill taken back out
  */
 
 const ON_TARGET = 0.0025;              // within a quarter of a percent: nothing to add
 const MIN_POUR = 0.2;                  // l: anything less is not worth a trip to the pump
+const MIN_TRACK = 1.0;                 // l: a measured fill counts once the tank reads this much more (it reads in 0.5 l)
 
 const isNum = (x) => typeof x === 'number' && isFinite(x);
 
@@ -71,12 +74,45 @@ class Book {
         this.known = !!s.known;
         this.log = Array.isArray(s.log) ? s.log.slice(0, 100) : [];
         this.fill = s.fill && typeof s.fill === 'object' ? s.fill : null;
+        this.track = s.track && typeof s.track === 'object' ? s.track : null;
     }
 
-    toJSON() { return { e: this.e, known: this.known, log: this.log, fill: this.fill }; }
+    toJSON() { return { e: this.e, known: this.known, log: this.log, fill: this.fill, track: this.track }; }
 
     /** The tank holds this much of this (a fresh start, or a correction). */
-    reset(e) { this.e = e; this.known = true; this.fill = null; this.log.unshift({ at: Date.now(), reset: true, eAfter: e }); }
+    reset(e) {
+        this.log.unshift({ at: Date.now(), reset: true, eBefore: this.e, knownBefore: this.known, eAfter: e });
+        this.e = e; this.known = true; this.fill = null; this.track = null;
+    }
+
+    /** Take the last fill (or reset) back out: the tank's content goes back to what it was before it. */
+    undo() {
+        const x = this.log[0];
+        if (!x || !isNum(x.eBefore)) return null;
+        this.log.shift();
+        this.e = x.eBefore;
+        if (x.knownBefore !== undefined) this.known = !!x.knownBefore;
+        return x;
+    }
+
+    /**
+     * A fill the car measures: trackStart(fuel, v0) with the tank's litres now; pump; trackDone();
+     * then trackFeed(reading, eFuel) with each reading from the car books it, once one has settled
+     * at least MIN_TRACK above where it started: { booked: the log entry } or null while it waits.
+     */
+    trackStart(fuel, v0, at) { this.track = { fuel, v0, at: at || Date.now(), done: false }; return this.track; }
+    trackDone() { if (this.track) this.track.done = true; }
+    trackCancel() { this.track = null; }
+    trackFeed(r, eFuel) {
+        const k = this.track;
+        if (!k || !k.done || !r || !r.settled || !isNum(r.v)) return null;
+        const litres = r.v - k.v0;
+        if (litres < MIN_TRACK) return null;
+        this.refuel({ fuel: k.fuel, litres, vAfter: r.v, eFuel });
+        this.log[0].measured = true;
+        this.track = null;
+        return { booked: this.log[0] };
+    }
 
     /**
      * A fill: litres of fuel (ethanol fraction eFuel) went in, and the tank holds vAfter now. The
@@ -85,7 +121,7 @@ class Book {
     refuel(f) {
         const vBefore = Math.max(0, f.vAfter - f.litres);
         const eAfter = mix(vBefore, this.e, f.litres, f.eFuel);
-        this.log.unshift({ at: f.at || Date.now(), fuel: f.fuel, litres: round(f.litres, 2), vAfter: round(f.vAfter, 1), eBefore: this.e, eAfter });
+        this.log.unshift({ at: f.at || Date.now(), fuel: f.fuel, litres: round(f.litres, 2), vAfter: round(f.vAfter, 1), eBefore: this.e, knownBefore: this.known, eAfter });
         this.log = this.log.slice(0, 100);
         this.e = eAfter; this.known = true;
         return eAfter;
@@ -152,4 +188,4 @@ class Book {
 
 function round(x, d) { const k = Math.pow(10, d); return Math.round(x * k) / k; }
 
-module.exports = { mix, topUp, fullTank, Book, ON_TARGET, MIN_POUR };
+module.exports = { mix, topUp, fullTank, Book, ON_TARGET, MIN_POUR, MIN_TRACK };
