@@ -125,7 +125,10 @@ const checks = [
         drive(GENTLE, 120);
         await tab(1);
         const t = await render();
-        ['EXHAUST GAS', 'HEAT LEAVING IN THE EXHAUST', 'GOING INTO TURBO + DOWNPIPE', 'BEING REJECTED', 'BEARING IF OFF NOW'].forEach((s) => assert(has(t, s), s + ': ' + t.join(' | ')));
+        // no DME on the bench: the gas is the model's own, and says so
+        assert(has(t, 'EXHAUST GAS (ESTIMATE)'), 'gas source: ' + t.join(' | '));
+        assert(t.some((x) => /^catalyst /.test(x)), 'no catalyst figure by the downpipe');
+        ['HEAT LEAVING IN THE EXHAUST', 'GOING INTO TURBO + DOWNPIPE', 'BEING REJECTED', 'BEARING IF OFF NOW'].forEach((s) => assert(has(t, s), s + ': ' + t.join(' | ')));
         assert(t.some((x) => /kW$/.test(x)), 'no kW figure');
     }],
     ['the Turbo page says when the engine is off and when it is on overrun', async () => {

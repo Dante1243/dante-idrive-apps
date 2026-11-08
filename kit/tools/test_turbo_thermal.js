@@ -98,6 +98,66 @@ const checks = [
         console.log('    warm-up rms ' + rms.toFixed(1) + ' C, reaching ' + tt.Th.toFixed(0) + ' C at 820 s (measured ' + WARM(820).toFixed(0) + ')');
         assert(rms < 60, 'warm-up off the measurement: rms ' + rms.toFixed(1));
     }],
+    ['[M] the hot spot at full load is near the 839 C measured, above the average', () => {
+        const tt = withGas(bench(1.7), 930, 130);
+        run(tt, { rpm: 5500, torque: 200, speed: 20, coolant: 95, oil: 110, ambient: 25 }, 3000, 1);
+        near(tt.Thot, 839, 30, 'hot spot');
+        assert(tt.Thot > tt.Th + 60, 'hot spot ' + tt.Thot.toFixed(0) + ' barely above the average ' + tt.Th.toFixed(0));
+        console.log('    hot spot ' + tt.Thot.toFixed(0) + ' C (measured 839), average ' + tt.Th.toFixed(0) + ' C');
+    }],
+    ['G20 330i stage 1: full throttle makes the turbo glow well inside 30 s, idle never does', () => {
+        const tt = new TurboThermal({ litres: 2.0 }), base = { coolant: 95, oil: 105, ambient: 15 };
+        run(tt, Object.assign({ rpm: 2000, torque: 80, speed: 100 }, base), 600, 0.1);
+        assert(!tt.glowing, 'glowing at a 2000 rpm cruise: ' + tt.Thot.toFixed(0));
+        let glowAt = null;
+        for (let t = 0.1; t <= 30; t += 0.1) {
+            const rpm = 2500 + 4000 * (t % 10) / 10;
+            tt.update(Object.assign({ rpm, torque: rpm <= 4500 ? 450 : 450 - (rpm - 4500) * 0.06, speed: 80 + t * 4 }, base), 0.1);
+            if (glowAt === null && tt.glowing) glowAt = t;
+        }
+        assert(glowAt !== null && glowAt < 15, 'glow at ' + glowAt);
+        assert(tt.Thot > 750, 'hot spot after 30 s ' + tt.Thot.toFixed(0));
+        run(tt, Object.assign({ rpm: 750, torque: 20, speed: 0 }, base), 120, 0.25);
+        assert(!tt.glowing && Math.abs(tt.Thot - tt.Th) < 30, 'still glowing after 2 min idle: ' + tt.Thot.toFixed(0) + ' / ' + tt.Th.toFixed(0));
+        const idle = new TurboThermal({ litres: 2.0 });
+        run(idle, { rpm: 750, torque: 20, speed: 0, coolant: 95, oil: 100, ambient: 30 }, 3000, 1);
+        assert(idle.Thot < 400, 'idle hot spot ' + idle.Thot.toFixed(0));
+        console.log('    glowing after ' + glowAt.toFixed(1) + ' s of full throttle, hot spot ' + tt.Thot.toFixed(0) + ' C two minutes after, idle ' + idle.Thot.toFixed(0) + ' C');
+    }],
+    ['the thin downpipe glows under full throttle, not at a cruise', () => {
+        const tt = new TurboThermal({ litres: 2.0 }), base = { coolant: 95, oil: 105, ambient: 15 };
+        run(tt, Object.assign({ rpm: 2300, torque: 120, speed: 110 }, base), 900, 0.25);
+        assert(!tt.pipeGlowing, 'downpipe glowing at 110 km/h: ' + tt.Tp.toFixed(0));
+        let at = null;
+        for (let t = 0.1; t <= 40; t += 0.1) { tt.update(Object.assign({ rpm: 5500, torque: 450, speed: 160 }, base), 0.1); if (at === null && tt.pipeGlowing) at = t; }
+        assert(at !== null && at < 30, 'downpipe glow at ' + at);
+        assert(tt.Tp > tt.Td, 'the thin pipe should lead the heavy downpipe and catalyst: ' + tt.Tp.toFixed(0) + ' / ' + tt.Td.toFixed(0));
+        console.log('    downpipe glows after ' + at.toFixed(1) + ' s of full throttle, ' + tt.Tp.toFixed(0) + ' C at 40 s');
+    }],
+    ['the DME catalyst figure corrects the gas temperature, steadily, per flow band', () => {
+        const base = { coolant: 95, oil: 105, ambient: 15 };
+        const truth = new TurboThermal({ litres: 2.0 }), tt = new TurboThermal({ litres: 2.0 });
+        truth.correction = () => 120;                    // the real engine runs its gas 120 C hotter than the map
+        const drive = (d, secs) => { let worst = 0; for (let i = 0; i < secs * 10; i++) { truth.update(d, 0.1); tt.update(Object.assign({ catDme: truth.Tc }, d), 0.1); worst = Math.max(worst, ...tt.learn.map(Math.abs)); } return worst; };
+        const worst = drive(Object.assign({ rpm: 2000, torque: 80, speed: 100 }, base), 900);
+        assert(tt.learning, 'not learning at a cruise');
+        near(tt.Tc, truth.Tc, 25, 'catalyst after 15 min cruise');
+        assert(worst < 200, 'learning overshot: ' + worst.toFixed(0));
+        drive(Object.assign({ rpm: 5500, torque: 450, speed: 160 }, base), 60);
+        near(tt.Tg, truth.Tg, 30, 'gas after a minute at full load');
+        // without the DME it keeps what it learned, and stops claiming it is live
+        const before = tt.learn.slice();
+        run(tt, Object.assign({ rpm: 2000, torque: 80, speed: 100 }, base), 30, 0.1);
+        assert.deepStrictEqual(tt.learn, before);
+        assert(!tt.learning, 'still says it is learning with no DME figure');
+        console.log('    learned ' + tt.learn.map((x) => x.toFixed(0)).join(' / ') + ' C across the flow bands (truth +120)');
+    }],
+    ['no DME: the model is exactly what it was', () => {
+        const a = new TurboThermal({ litres: 2.0 }), b = new TurboThermal({ litres: 2.0 });
+        const d = { rpm: 4000, torque: 300, speed: 120, coolant: 95, oil: 110, ambient: 20 };
+        run(a, d, 60); run(b, Object.assign({ catDme: null, afterCatDme: null }, d), 60);
+        assert.strictEqual(a.Th, b.Th); assert(a.learn.every((x) => x === 0));
+    }],
     ['[H] a hot stop soaks the bearing housing about 60 C, to around 220 C', () => {
         const tt = new TurboThermal({ litres: 2.0 });
         tt.update({ rpm: 5500, torque: 400, speed: 180, coolant: 105, oil: 120, ambient: 25 }, 0);
@@ -155,6 +215,7 @@ const checks = [
             tt.update({ rpm: i % 4000 < 2000 ? 6500 : 0, torque: i % 4000 < 2000 ? 390 : 0, speed: (i % 7000) / 40, coolant: 95, oil: 110, ambient: 20 }, 0.25);
             assert(isFinite(tt.Th) && isFinite(tt.Td) && isFinite(tt.Tb), 'not finite at ' + i);
             assert(tt.Th < 960 && tt.Th > 15, 'housing out of range: ' + tt.Th);
+            assert(isFinite(tt.Thot) && tt.Thot < 960 && tt.Thot >= tt.Th, 'hot spot out of range: ' + tt.Thot);
         }
     }],
     ['missing signals: no torque, no ambient, no boost still runs', () => {

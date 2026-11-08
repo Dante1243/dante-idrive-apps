@@ -2,11 +2,20 @@
   "id": "warmup",
   "title": "Warm-Up",
   "description": "Oil and coolant warm-up (time to ready), safe rev limit, a live turbo and downpipe heat balance, and an oil icon on the cluster",
-  "version": "1.10.0",
+  "version": "1.11.0",
   "vendor": "dante",
   "loggingId": "OA9A",
   "iconGlyph": "temp",
   "signals": {
+    "com.harman.infotainment.systemfunctions.tasu.tasu.InternalTasu": {
+      "_instances": "SystemFunctionsInternalTasuInst1",
+      "_methods": [
+        "sendTasuRequest"
+      ],
+      "_broadcasts": [
+        "sendTasuResponse"
+      ]
+    },
     "de.bmw.infotainment.vehicle.CDS": {
       "statusEngineSpeed2": "rs",
       "statusEngineTemperature": "rs"

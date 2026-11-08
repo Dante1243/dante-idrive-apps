@@ -13,8 +13,8 @@
  *   Turbo page
  *   - a live heat balance from rpm, torque and road speed (turbo_thermal.js, THERMAL.md): the kW the
  *     exhaust is carrying, the kW going into the turbo and downpipe, the kW being rejected, and an
- *     estimate of their temperatures. Fitted to published measurements, but an estimate: no car in
- *     this family has an exhaust temperature sensor to check it against
+ *     estimate of their temperatures, hot spots included. Fitted to published measurements, and
+ *     corrected live by the DME's own catalyst temperature model when it answers (dme_exhaust.js)
  *   - cool-down: where the bearing housing would peak if you switched off now, and how long until
  *     that is under the limit
  *
@@ -33,6 +33,9 @@ const G = require('./kit/gauges');
 const Car = require('./kit/car');
 const { ClusterBadge } = require('./cluster_badge');
 const { TurboThermal } = require('./turbo_thermal');
+const { DmeExhaust } = require('./dme_exhaust');
+const fs = require('fs');
+const path = require('path');
 const { SlotLab, parseStatus, snapshot, explain, hex } = require('./slot_lab');
 
 let ClusterRender = null;
@@ -58,6 +61,17 @@ mgu.run({
         /* ---------- turbo / downpipe heat balance (turbo_thermal.js, THERMAL.md) ---------- */
         const turbo = new TurboThermal({ litres: settings.get('engineL'), ambientFallback: settings.get('ambientC') });
         settings.onChange(() => { turbo.litres = settings.get('engineL'); turbo.ambientFallback = settings.get('ambientC'); });
+        // the DME's own exhaust temperatures (dme_exhaust.js) correct the model's gas temperature; what
+        // that has taught it belongs to this engine and its tune, so it is kept between drives
+        const dme = new DmeExhaust({ signals: ctx.signals, log: ctx.log });
+        const LEARNED = path.join(ctx.dataDir || '.', 'dme_learned.json');
+        try {
+            const v = JSON.parse(fs.readFileSync(LEARNED, 'utf8'));
+            if (Array.isArray(v.learn) && v.learn.length === turbo.learn.length && v.learn.every(G.isNum)) turbo.learn = v.learn;
+        } catch (e) { /* first drive */ }
+        let learnedSaved = 0;
+        const saveLearned = () => { try { fs.writeFileSync(LEARNED, JSON.stringify({ learn: turbo.learn.map((x) => Math.round(x * 10) / 10) })); } catch (e) { ctx.log.warn('save learned: ' + e); } };
+        process.on('exit', () => { if (learnedSaved) saveLearned(); });
 
         /* ---------- cluster badge: oil telltale on the instrument cluster ---------- */
         // Needs robertnisipeanu's cluster-render installed; a no-op without it (see CLUSTER.md).
@@ -106,17 +120,21 @@ mgu.run({
         car.onSample((d, t) => {
             // sample times (the demo replays late steps with theirs) are wall-clock: a step back counts as no time
             const dt = lastT ? G.clamp(t - lastT, 0, 250) / 1000 : 0, m = mono(); lastT = t;
-            turbo.update(d, dt);
+            let fresh = { cat: null, after: null };
+            if (!d.demo) { dme.tick(G.isNum(d.rpm) && d.rpm > 300, m); fresh = dme.fresh(m); }
+            turbo.update(Object.assign({}, d, { catDme: fresh.cat, afterCatDme: fresh.after }), dt);
+            if (turbo.learning && m - learnedSaved > 60000) { learnedSaved = m; saveLearned(); }
             if (m - lastHist > 5000 && (G.isNum(d.oil) || G.isNum(d.coolant))) {
                 lastHist = m; hist.push([m, d.oil, d.coolant, d.rpm, d.speed]);
-                if (G.isNum(turbo.Th)) thist.push([m, turbo.Th, turbo.Td]);
+                if (G.isNum(turbo.Th)) thist.push([m, turbo.Thot, turbo.Tp]);
                 while (hist.length > 240) hist.shift();
                 while (thist.length > 240) thist.shift();
             }
             // for checking it against a thermocouple, should anyone ever fit one
             if (G.isNum(turbo.Th) && m - lastLog > 5000) {
                 lastLog = m;
-                ctx.log.info('turbo gas ' + (G.isNum(turbo.Tg) ? Math.round(turbo.Tg) : '-') + ' housing ' + Math.round(turbo.Th) + ' downpipe ' + Math.round(turbo.Td)
+                ctx.log.info('turbo gas ' + (G.isNum(turbo.Tg) ? Math.round(turbo.Tg) : '-') + ' housing ' + Math.round(turbo.Th) + ' hot spot ' + Math.round(turbo.Thot) + ' downpipe ' + Math.round(turbo.Td) + ' pipe ' + Math.round(turbo.Tp)
+                    + ' cat ' + Math.round(turbo.Tc) + ' dme ' + (G.isNum(turbo.catDme) ? Math.round(turbo.catDme) : '-') + ' (' + dme.state + ', learned ' + turbo.learn.map((x) => Math.round(x)).join('/') + ')'
                     + ' bearing ' + Math.round(turbo.Tb) + ' C, exhaust ' + turbo.qExh.toFixed(1) + ' in ' + turbo.qIn.toFixed(1) + ' out ' + turbo.qOut.toFixed(1)
                     + ' kW, soak ' + Math.round(turbo.soak) + ', rpm ' + Math.round(d.rpm || 0) + ' Nm ' + Math.round(d.torque || 0) + ' kmh ' + Math.round(d.speed || 0)
                     + ' boost ' + (G.isNum(d.boost) ? d.boost.toFixed(2) : '-') + (turbo.boostOk ? '' : '?') + ' amb ' + (G.isNum(d.ambient) ? Math.round(d.ambient) : '-'));
@@ -322,8 +340,16 @@ mgu.run({
 
         function drawTurbo(cv, t, d) {
             const room = G.pageBottom(cv) - G.BOTTOM, half = Math.round(room / 2);
-            hotBar(cv, t, G.TOP, 225 + half, turbo.Th, 'Turbine housing (estimate)');
-            hotBar(cv, t, G.TOP + 242 + half, 225 - half, turbo.Td, 'Downpipe (estimate)');
+            // (the title is part of a cached panel image: keep it to two fixed texts, the average goes beside it)
+            const title = turbo.glowing ? 'Turbine hot spot: GLOWING' : 'Turbine hot spot (estimate)';
+            hotBar(cv, t, G.TOP, 225 + half, turbo.Thot, title);
+            if (G.isNum(turbo.Th)) cv.text('housing average ' + Math.round(T(turbo.Th)) + tU(), 24 + 18 + cv.textWidth(title, 26) + 28, G.TOP + 42, 22, t.dim);
+            const dpTitle = turbo.pipeGlowing ? 'Downpipe: GLOWING' : 'Downpipe (estimate)';
+            hotBar(cv, t, G.TOP + 242 + half, 225 - half, turbo.Tp, dpTitle);
+            if (G.isNum(turbo.Tc)) {
+                const cat = G.isNum(turbo.catDme) ? 'catalyst ' + Math.round(T(turbo.catDme)) + tU() + ' (DME)' : 'catalyst ~' + Math.round(T(turbo.Tc)) + tU();
+                cv.text(cat, 24 + 18 + cv.textWidth(dpTitle, 26) + 28, G.TOP + 242 + half + 42, 22, t.dim);
+            }
 
             const sp = G.panel(cv, t, 928, 44, 648, 468, null);
             const have = G.isNum(turbo.Th), net = turbo.qIn - turbo.qOut;
@@ -341,7 +367,8 @@ mgu.run({
                 cv.text(label, 952, y, 22, t.dim, { font: 'bold', spacing: 1.5 });
                 cv.text(value, 1552, y + 1, 28, c || t.text, { align: 'right', font: 'bold' });
             };
-            row(156, 'EXHAUST GAS', G.isNum(turbo.Tg) ? '~' + Math.round(T(turbo.Tg)) + tU() : '--');
+            const src = d.demo ? '' : turbo.learning ? ' (DME-CORRECTED)' : dme.state === 'no answer' ? ' (DME SILENT)' : ' (ESTIMATE)';
+            row(156, 'EXHAUST GAS' + src, G.isNum(turbo.Tg) ? '~' + Math.round(T(turbo.Tg)) + tU() : '--');
             row(192, 'HEAT LEAVING IN THE EXHAUST', kw(turbo.qExh));
             row(228, 'GOING INTO TURBO + DOWNPIPE', kw(turbo.qIn), t.warn);
             row(264, 'BEING REJECTED', kw(turbo.qOut), GO);
@@ -364,7 +391,7 @@ mgu.run({
             const now0 = thist.length ? thist[thist.length - 1][0] : mono();
             const span = G.clamp(thist.length ? now0 - thist[0][0] : 0, 300000, 1200000);
             const X = (ts) => gx + gw - ((now0 - ts) / span) * gw, Y = (c) => gy + gh - G.clamp(c / 1000, 0, 1) * gh;
-            cv.fillRect(gx, gy - 20, 22, 4, t.oil || t.accent); cv.text('HOUSING', gx + 30, gy - 11, 20, t.dim, { font: 'bold' });
+            cv.fillRect(gx, gy - 20, 22, 4, t.oil || t.accent); cv.text('HOT SPOT', gx + 30, gy - 11, 20, t.dim, { font: 'bold' });
             cv.fillRect(gx + 150, gy - 20, 22, 4, t.cold); cv.text('DOWNPIPE', gx + 180, gy - 11, 20, t.dim, { font: 'bold' });
             [[1, t.oil || t.accent], [2, t.cold]].forEach(([i, c]) => {
                 const pts = thist.filter((h) => G.isNum(h[i])).map((h) => [X(h[0]), Y(h[i])]).filter((p) => p[0] >= gx);
