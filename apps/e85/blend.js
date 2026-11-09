@@ -20,7 +20,7 @@
 
 const ON_TARGET = 0.0025;              // within a quarter of a percent: nothing to add
 const MIN_POUR = 0.2;                  // l: anything less is not worth a trip to the pump
-const MIN_TRACK = 1.0;                 // l: a measured fill counts once the tank reads this much more (it reads in 0.5 l)
+const MIN_TRACK = 1.0;                 // l: a measured fill counts once the tank reads this much more (it reads in 1 l)
 
 const isNum = (x) => typeof x === 'number' && isFinite(x);
 

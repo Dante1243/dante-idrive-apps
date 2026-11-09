@@ -3,7 +3,7 @@
  * E85 Blend - what ethanol content is in the tank, and what to pump to hit a target.
  *
  *   Blend page
- *   - the tank: litres from the car (tank.js: the engine unit's two tank halves, 0.5 l, else the
+ *   - the tank: litres from the car (tank.js: the engine unit's whole-tank level, else the
  *     cluster's gauge), and the ethanol content book-kept from every fill (blend.js)
  *   - the target (E0-E85): a top-up (one fuel, as little as gets there) and a full tank (both fuels)
  *   - at the pump: Top up / Full, 98 first / Full, E85 first. It says what to pump; Done (with the
@@ -148,7 +148,7 @@ mgu.run({
         /* ---------- format ---------- */
         const E = (e) => 'E' + pctText(e * 100);
         const L1 = (v) => (v === null || v === undefined ? '--' : v.toFixed(1) + ' l');
-        const SRC = { dme: 'engine unit, 0.5 l', dme1: 'engine unit, 1 l', kombi: 'cluster gauge, 1 l', demo: 'demo' };
+        const SRC = { dme1: 'engine unit, whole tank', kombi: 'cluster gauge, 1 l', demo: 'demo' };
         const when = (ms) => { const d = new Date(ms), p = (n) => String(n).padStart(2, '0'); return p(d.getDate()) + '.' + p(d.getMonth() + 1) + '. ' + p(d.getHours()) + ':' + p(d.getMinutes()); };
 
         /* ---------- Blend page ---------- */

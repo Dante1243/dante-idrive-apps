@@ -8,7 +8,7 @@ const assert = require('assert');
 const path = require('path');
 const APP = path.join(__dirname, '..', '..', 'apps', 'e85');
 const { mix, topUp, fullTank, Book } = require(path.join(APP, 'blend.js'));
-const { Tank, LEFT, RIGHT, WHOLE } = require(path.join(APP, 'tank.js'));
+const { Tank, WHOLE } = require(path.join(APP, 'tank.js'));
 const { check } = require(path.join(__dirname, '..', 'runtime', 'readonly-diag.js'));
 
 const near = (got, want, tol, what) => assert(Math.abs(got - want) <= tol, what + ': got ' + got + ', want ' + want);
@@ -145,21 +145,19 @@ const checks = [
         assert.strictEqual(b.e, 0.1); assert.strictEqual(b.known, false);
         assert.strictEqual(b.undo(), null);
     }],
-    ['the tank reads only, and the halves are 0.5 l', () => {
-        for (const c of LEFT.concat(RIGHT, WHOLE)) check(0x12, 0x22, [parseInt(c.did.slice(0, 2), 16), parseInt(c.did.slice(2), 16)], false);
-        assert.strictEqual(LEFT[0].factor, 0.5); assert.strictEqual(RIGHT[0].factor, 0.5);
+    ['the tank reads only, and only the whole tank (583B)', () => {
+        for (const c of WHOLE) check(0x12, 0x22, [parseInt(c.did.slice(0, 2), 16), parseInt(c.did.slice(2), 16)], false);
+        assert.deepStrictEqual(WHOLE.map((c) => c.did), ['583B']);
     }],
-    ['the tank: both halves added up; else the whole; median of the last readings', async () => {
-        let vals = { left: 15.5, right: 16 };
-        const reader = { value: (n) => Promise.resolve(vals[n] === undefined ? null : vals[n]) };
+    ['the tank: the whole tank, never the halves; median of the last readings', async () => {
+        const asked = new Set();
+        const vals = { left: 15.5, right: 16, whole: 30 };
+        const reader = { value: (n) => { asked.add(n); return Promise.resolve(vals[n] === undefined ? null : vals[n]); } };
         const tank = new Tank({ reader });
         for (let i = 0; i < 4; i++) { tank.tick(1000 + i * 2000); await tick(); await tick(); await tick(); tank.now(1000 + i * 2000); }
         const r = tank.now(7000);
-        assert.deepStrictEqual([r.v, r.src, r.settled], [31.5, 'dme', true]);
-        vals = { whole: 30 };
-        tank.tick(9000); await tick(); await tick(); await tick(); await tick();
-        const w = tank.now(9000);
-        assert.deepStrictEqual([w.v, w.src, w.settled], [30, 'dme1', false]);
+        assert.deepStrictEqual([r.v, r.src, r.settled], [30, 'dme1', true]);
+        assert.deepStrictEqual([...asked], ['whole'], 'the halves are never asked');
     }],
     ['no DME: the cluster gauge; nothing fresh: null', () => {
         const tank = new Tank({ reader: { value: () => Promise.resolve(null) } });
