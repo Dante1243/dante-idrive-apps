@@ -1,8 +1,8 @@
 {
   "id": "e85",
   "title": "E85 Blend",
-  "description": "The ethanol content in your tank from the fills you book and the car's own tank level, and how many litres of E85 or 98 hit your target: a top-up or a full tank, step by step at the pump",
-  "version": "1.1.1",
+  "description": "The ethanol content in your tank from the fills you book and the car's own tank level, and how many litres of E85 or 98 hit your target: a top-up or a full tank, step by step at the pump. Warns before your tune's safe limit, and tracks what fuel costs you",
+  "version": "1.2.0",
   "vendor": "dante",
   "loggingId": "OAA1",
   "iconGlyph": "e85",
@@ -35,6 +35,12 @@
   "settings": [
     {"key": "target", "label": "Target ethanol content", "type": "number", "unit": "%", "default": 30,
      "steps": [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85]},
+    {"key": "eMin", "label": "Desired ethanol from", "type": "number", "unit": "%", "default": 20,
+     "steps": [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85]},
+    {"key": "eMax", "label": "Desired ethanol up to", "type": "number", "unit": "%", "default": 30,
+     "steps": [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85]},
+    {"key": "eSafe", "label": "Safe limit of your tune", "type": "number", "unit": "%", "default": 30,
+     "steps": [10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85]},
     {"key": "e85Pct", "label": "Ethanol in your E85", "type": "number", "unit": "%", "default": 85,
      "steps": [65, 70, 75, 80, 85]},
     {"key": "petrolPct", "label": "Ethanol in your 98", "type": "number", "unit": "%", "default": 0,

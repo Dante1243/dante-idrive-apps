@@ -30,6 +30,7 @@ class Tank {
         this.signals = opts.signals;
         this.reader = opts.reader || null;
         this.kombi = null;           // { v, at }
+        this.odo = null;             // km, the last the cluster sent
         this.dme = null;             // { v, src, at }
         this.recent = [];            // [v] of the source in use, newest last
         this.src = null;
@@ -39,6 +40,9 @@ class Tank {
                 statusRangeTankStatus: (s) => {
                     const v = s && s.fluidLevelFuelTank;
                     if (typeof v === 'number' && v >= 0 && v < 255) this.kombi = { v, at: Date.now() };
+                    // the odometer comes in the same message (cost per 100 km)
+                    const km = s && Number(s.mileageKilometre);
+                    if (isFinite(km) && km > 0 && km < 2000000) this.odo = km;
                 },
             }, this.log).catch(() => {});
         }

@@ -7,7 +7,7 @@
 const assert = require('assert');
 const path = require('path');
 const APP = path.join(__dirname, '..', '..', 'apps', 'e85');
-const { mix, topUp, fullTank, Book } = require(path.join(APP, 'blend.js'));
+const { mix, topUp, fullTank, Book, limits, zone, maxBeforeSafe, usage } = require(path.join(APP, 'blend.js'));
 const { Tank, WHOLE } = require(path.join(APP, 'tank.js'));
 const { check } = require(path.join(__dirname, '..', 'runtime', 'readonly-diag.js'));
 
@@ -158,6 +158,42 @@ const checks = [
         const r = tank.now(7000);
         assert.deepStrictEqual([r.v, r.src, r.settled], [30, 'dme1', true]);
         assert.deepStrictEqual([...asked], ['whole'], 'the halves are never asked');
+    }],
+    ['limits: put in order, the range never past the safe limit', () => {
+        assert.deepStrictEqual(limits(20, 30, 30), { min: 0.2, max: 0.3, safe: 0.3 });
+        assert.deepStrictEqual(limits(30, 20, 40), { min: 0.2, max: 0.3, safe: 0.4 });
+        assert.deepStrictEqual(limits(35, 50, 30), { min: 0.3, max: 0.3, safe: 0.3 });
+    }],
+    ['zones: grey under the range, in it, over it, past the limit', () => {
+        const L = limits(20, 30, 40);
+        assert.deepStrictEqual([0.1, 0.2, 0.25, 0.3, 0.35, 0.4, 0.41].map((e) => zone(e, L)), ['low', 'ok', 'ok', 'ok', 'over', 'over', 'unsafe']);
+    }],
+    ['the most E85 before the safe limit lands exactly on it', () => {
+        const q = maxBeforeSafe(30, 0.1, 0.85, 0.3);
+        near(mix(30, 0.1, q, 0.85), 0.3, 1e-12, 'lands on E30');
+        assert.strictEqual(maxBeforeSafe(30, 0.1, 0, 0.3), Infinity, '98 never takes it over');
+        assert.strictEqual(maxBeforeSafe(30, 0.35, 0.85, 0.3), 0, 'already over');
+    }],
+    ['a fill keeps its price, cost and odometer', () => {
+        const b = new Book({ e: 0, known: true });
+        b.refuel({ fuel: 'E85', litres: 10, vAfter: 40, eFuel: 0.85, price: 1.659, km: 23000 });
+        assert.deepStrictEqual([b.log[0].price, b.log[0].cost, b.log[0].km], [1.659, 16.59, 23000]);
+        b.refuel({ fuel: '98', litres: 5, vAfter: 45, eFuel: 0 });
+        assert.strictEqual(b.log[0].cost, undefined, 'no price, no cost');
+    }],
+    ['usage: l/100 km from the tank and the odometer, cost from the prices', () => {
+        const now = Date.UTC(2026, 10, 9);
+        const log = [
+            { at: now - 86400000, fuel: '98', litres: 20, vAfter: 45, price: 2.0, cost: 40, km: 23400 },
+            { at: now - 5 * 86400000, fuel: 'E85', litres: 30, vAfter: 55, price: 1.5, cost: 45, km: 23000 },
+        ];
+        // 55 l after the first fill, 20 l added, 35 l now: 40 l burned in 600 km
+        const u = usage(log, 35, 23600, now);
+        near(u.per100, 40 / 600 * 100, 1e-9, 'l/100 km');
+        near(u.cost100, u.per100 * (20 * 2 + 30 * 1.5) / 50, 1e-9, 'cost per 100 km at the litres-weighted price');
+        assert.deepStrictEqual([u.spent30, u.litres30], [85, 50]);
+        assert.strictEqual(usage(log, 54, 23010, now).per100, null, 'not until 50 km');
+        assert.strictEqual(usage([{ at: now, fuel: '98', litres: 5, vAfter: 40 }], 30, 24000, now).per100, null, 'no odometer');
     }],
     ['no DME: the cluster gauge; nothing fresh: null', () => {
         const tank = new Tank({ reader: { value: () => Promise.resolve(null) } });
