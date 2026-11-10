@@ -83,7 +83,7 @@ async function start(over) {
 function drive(d, s) {
     for (let i = 0; i < s * 10; i++) { mono += 100; wall += 100; car.d = d; car.fn(d, wall); }
 }
-const HARD = { rpm: 5500, torque: 390, oil: 118, coolant: 104, speed: 150, ambient: 20 };
+const HARD = { rpm: 5500, torque: 390, oil: 120, coolant: 105, speed: 130, ambient: 30 };      // flat out on a hot day: the bearing soak well over 180 C
 const GENTLE = { rpm: 1500, torque: 40, oil: 100, coolant: 95, speed: 50, ambient: 20 };
 const IDLE = { rpm: 750, torque: 20, oil: 100, coolant: 95, speed: 0, ambient: 20 };
 const COLD = { rpm: 750, torque: 20, oil: 40, coolant: 40, speed: 0, ambient: 20 };
@@ -137,7 +137,7 @@ const checks = [
         const t = await render();
         // no DME on the bench: the gas is the model's own, and says so
         assert(has(t, 'EXHAUST GAS (ESTIMATE)'), 'gas source: ' + t.join(' | '));
-        assert(t.some((x) => /^catalyst /.test(x)), 'no catalyst figure by the downpipe');
+        assert(t.some((x) => /^pipe .*, catalyst /.test(x)), 'no pipe and catalyst figures by the downpipe: ' + t.join(' | '));
         ['HEAT LEAVING IN THE EXHAUST', 'GOING INTO TURBO + DOWNPIPE', 'BEING REJECTED', 'BEARING IF OFF NOW'].forEach((s) => assert(has(t, s), s + ': ' + t.join(' | ')));
         assert(t.some((x) => /kW$/.test(x)), 'no kW figure');
     }],

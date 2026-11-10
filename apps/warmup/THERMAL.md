@@ -54,7 +54,10 @@ the volute, which is what glows first. It is tracked separately because it follo
 seconds, while the 9 kg housing as a whole takes minutes. It is fed by the gas (growing with
 flow^0.8), radiates one face, and leaks heat into the thick body around it. It is for display only;
 the housing lump still carries the heat, so the cool-down advice does not change. The Turbo page's
-top bar shows the hot spot, with the housing average beside it, and says GLOWING above 600 C.
+top bar shows the housing, which is what a thermometer on its outside reads (a cast wall that thick
+is within about 10 C through), with the hottest spot inside beside it. It says GLOWING once the hot
+spot passes 700 C: 525 C (the Draper point) is a faint glow only in total darkness and 600-650 C a dull
+red at night, so 600 C called a plain cruise "glowing", which no turbo does.
 
 The same goes for the **downpipe**: the heavy lump above includes the catalyst brick, but the
 pipe from the turbine outlet into it is 1.5 mm stainless and follows the gas in seconds. The Turbo
@@ -79,8 +82,10 @@ The chain from the signals:
 | [M] Savaripour et al., Clean Technologies 2022, 1.7 L gasoline | engine-off cool-down from full load: 683 C to 418 C in 450 s | within 9 C rms, 23 C at worst |
 | [M] | warm-up at 2000 rpm, 28 Nm from 8 C | within 29 C rms, 404 C at 820 s against 450 C measured |
 | [M] | full load: wall 643-722 C on average, 839 C at its hottest | 729 C, hot spot 838 C |
-| The owner's G20 330i, stage 1 | the turbo visibly glowing in under 30 s of full throttle | hot spot past 600 C in about 3 s, 740 C at 10 s, 800 C at 20 s |
-| The same car | the downpipe glowing too | thin pipe past 600 C in about 13 s |
+| The owner's G20 330i, stage 1 | the turbo visibly glowing in under 30 s of full throttle | hot spot past 700 C in about 9 s |
+| The same car | the downpipe glowing too | thin pipe past 700 C in about 34 s |
+| The same car | about 320 C on an IR thermometer on the outside of the housing, a minute or two after normal driving | 361 C after a minute, 345 C after two (an IR gun set for paint reads oxidised steel 25-45 C low) |
+| Owner reports, turbo petrol engines | 700-800 C turbine inlet gas at a closed-loop cruise | never above 790-830 C at any cruise up to 130 km/h, whatever the DME's catalyst figure; never glowing |
 | [M] | bearing housing at full load: 122-155 C | 131 C |
 | [A] Aghaali, KTH 2012, 2 L GDI | 625 C gas holds a 419 C wall | 426 C |
 | [A] | 848 C gas holds a 617 C wall | 613 C |
@@ -108,9 +113,30 @@ Warm, 20 C outside, steady state. The hard rows assume about 225 kW; a stock 330
 | Hard climb | 924 C | 727 C | 705 C | 152 kW |
 | Full throttle, held | 945 C | 754 C | 732 C | 283 kW |
 
-**Road speed does not beat load.** Airflow helps, but at 110 km/h the engine is still putting more
-heat in than the extra air takes out. After six hard minutes the housing reaches 548 C in 2 minutes
-idling, 562 C at 60 km/h and 591 C at 110 km/h. The fastest cooling is overrun, then low load.
+**On the road, not on a bench.** The published measurements come from test benches: still air, a fan
+at most. In the car, air comes through the grille and the bay (`airRam`, from 20 km/h up), and that
+was fitted to the owner's own reading above: without it the model had the housing at about 430 C a
+minute after normal driving. At a 110 km/h cruise the housing now sits around 390-440 C and the gas
+around 750 C. Overrun cools fastest, then low load.
+
+**Switching off: the wheel, not just the housing.** The cool-down advice used to watch only the bearing
+soak, which comes from the 9 kg housing. One hard pull hardly moves that, so it said "OK to switch off"
+straight after a pull. The turbine wheel and shaft (`Tw`: ~170 J/K of nickel alloy and steel, the gas
+over every blade, ~4 s to follow it at full flow) are what a pull heats, and the shaft runs into the
+bearing. Switched off then, that heat goes into a bearing with no oil moving. Now:
+
+- the wheel's heat goes into the bearing in the soak (`wToB`), and
+- switching off waits until the wheel is back under `wheelOff` (500 C), which idling at ~400 C gas does.
+
+That gives 0 s of idle after town driving, about 25 s after a motorway cruise, about 55 s after one hard
+pull and about 85 s after five minutes flat out, against the "about a minute after heavy load" in owner's
+manuals (Kia, Hyundai) and the usual 30-60 s. While driving faster than 20 km/h the wheel does not raise
+the cool-down screen: it only matters once you stop. The Turbo page shows the wheel beside the housing.
+
+**The DME's catalyst figure cannot make a cruise hot.** The catalyst burns what is left of CO, H2 and
+HC in the gas, about 3 % of the fuel's energy, so it runs well above the gas reaching it. Learning
+from it once taught the model gas over 900 C at a 110 km/h cruise; the gas now has a ceiling for each
+flow (`egtMax`: about 790 C at a cruise, 1000 C at full load).
 
 **A pull lights up the hot spot long before it soaks the housing.** From a 2000 rpm cruise, a full
 throttle pull puts about 55 kW into the turbo and downpipe. The hot spot goes from about 520 C to 650 C in

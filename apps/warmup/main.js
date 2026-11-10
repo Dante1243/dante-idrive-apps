@@ -125,17 +125,18 @@ mgu.run({
             let fresh = { cat: null, after: null };
             if (!d.demo) { dme.tick(G.isNum(d.rpm) && d.rpm > 300, m); fresh = dme.fresh(m); }
             turbo.update(Object.assign({}, d, { catDme: fresh.cat, afterCatDme: fresh.after }), dt);
+            slowNow = !(G.isNum(d.speed) && d.speed >= 20);
             if (turbo.learning && m - learnedSaved > 60000) { learnedSaved = m; saveLearned(); }
             if (m - lastHist > 5000 && (G.isNum(d.oil) || G.isNum(d.coolant))) {
                 lastHist = m; hist.push([m, d.oil, d.coolant, d.rpm, d.speed]);
-                if (G.isNum(turbo.Th)) thist.push([m, turbo.Thot, turbo.Tp]);
+                if (G.isNum(turbo.Th)) thist.push([m, turbo.Th, turbo.downpipe]);
                 while (hist.length > 240) hist.shift();
                 while (thist.length > 240) thist.shift();
             }
             // for checking it against a thermocouple, should anyone ever fit one
             if (G.isNum(turbo.Th) && m - lastLog > 5000) {
                 lastLog = m;
-                ctx.log.info('turbo gas ' + (G.isNum(turbo.Tg) ? Math.round(turbo.Tg) : '-') + ' housing ' + Math.round(turbo.Th) + ' hot spot ' + Math.round(turbo.Thot) + ' downpipe ' + Math.round(turbo.Td) + ' pipe ' + Math.round(turbo.Tp)
+                ctx.log.info('turbo gas ' + (G.isNum(turbo.Tg) ? Math.round(turbo.Tg) : '-') + ' housing ' + Math.round(turbo.Th) + ' hot spot ' + Math.round(turbo.Thot) + ' wheel ' + Math.round(turbo.Tw) + ' downpipe ' + Math.round(turbo.downpipe) + ' (' + turbo.dpPart + ') lump ' + Math.round(turbo.Td) + ' pipe ' + Math.round(turbo.Tp)
                     + ' cat ' + Math.round(turbo.Tc) + ' dme ' + (G.isNum(turbo.catDme) ? Math.round(turbo.catDme) : '-') + ' (' + dme.state + ', learned ' + turbo.learn.map((x) => Math.round(x)).join('/') + ')'
                     + ' bearing ' + Math.round(turbo.Tb) + ' C, exhaust ' + turbo.qExh.toFixed(1) + ' in ' + turbo.qIn.toFixed(1) + ' out ' + turbo.qOut.toFixed(1)
                     + ' kW, soak ' + Math.round(turbo.soak) + ', rpm ' + Math.round(d.rpm || 0) + ' Nm ' + Math.round(d.torque || 0) + ' kmh ' + Math.round(d.speed || 0)
@@ -170,9 +171,13 @@ mgu.run({
 
         /* ---------- cool-down: what the soak says ---------- */
         // secondsToSafe looks ahead with the model, so it is not done every frame
-        let safeAt = -1e9, safeNow = null, safeIdle = null, soakStart = null;
+        let safeAt = -1e9, safeNow = null, safeIdle = null, soakStart = null, wheelStart = null;
         const coolingOn = () => settings.get('cooldown') && G.isNum(turbo.soak);
-        const soaked = () => coolingOn() && turbo.soak > settings.get('soakLimit');
+        // switching off is not safe while the bearing would soak over the limit, nor (coming to a stop or
+        // parked) while the turbine wheel still holds a pull's heat: a hard pull moves the soak little
+        let slowNow = true;
+        const wheelWait = () => turbo.wheelHot && (slowNow || !turbo.running);
+        const soaked = () => coolingOn() && (turbo.soak > settings.get('soakLimit') || wheelWait());
         function safeTimes(d) {
             const m = mono();
             if (m - safeAt < 2000) return;
@@ -287,16 +292,20 @@ mgu.run({
                     : eo.state === 'off' ? 'Engine off - oil not warming' : eo.state === 'stalled' ? 'Oil not warming' : '';
                 cv.text(line, 952, 170, 24, eo.state === 'ready' ? GO : t.dim, { font: 'bold' });
                 cv.text('IF YOU SWITCH OFF NOW', 952, 210, 22, t.dim, { font: 'bold', spacing: 1.5 });
-                cv.text('bearing soaks to ' + Math.round(T(turbo.soak)) + tU(), 1552, 210, 22, t.warn, { align: 'right', font: 'bold' });
+                const why = turbo.soak > settings.get('soakLimit') ? 'bearing soaks to ' + Math.round(T(turbo.soak)) + tU() : 'turbine wheel ' + Math.round(T(turbo.Tw)) + tU() + ' from the pull';
+                cv.text(why, 1552, 210, 22, t.warn, { align: 'right', font: 'bold' });
                 const left = G.isNum(safeIdle) ? safeIdle : null;
                 const lw = cv.text(left === null ? '--' : String(Math.ceil(left)), 952, 289, 80, t.text, { font: 'num' });
                 if (left !== null) cv.text('s', 962 + lw, 289, 30, t.dim);
                 cv.text(!turbo.running ? 'engine off: idling would cool it' : !G.isNum(safeNow) ? 'at idle: this pace keeps it hot' : shortTime(safeNow) === shortTime(left === null ? 0 : left) ? 'keep it gentle' : 'at idle, ' + shortTime(safeNow) + ' like this', 1552, 262, 24, t.text, { align: 'right', font: 'bold' });
-                const span = soakStart - settings.get('soakLimit'), f = span > 0 ? G.clamp((soakStart - turbo.soak) / span, 0, 1) : 1;
+                // progress: of the soak towards the limit, or of the wheel towards idle heat
+                wheelStart = wheelStart === null ? turbo.Tw : Math.max(wheelStart, turbo.Tw);
+                const off = turbo.k.wheelOff, fs = soakStart - settings.get('soakLimit') > 0 ? G.clamp((soakStart - turbo.soak) / (soakStart - settings.get('soakLimit')), 0, 1) : 1;
+                const fw = wheelStart > off ? G.clamp((wheelStart - turbo.Tw) / (wheelStart - off), 0, 1) : 1, f = Math.min(fs, fw);
                 cv.roundRect(952, 303, 600, 12, 6, t.track);
                 if (f > 0) cv.rampRect(952, 303, Math.max(12, 600 * f), 12, 6, [t.warn, GO], 952, 600);
             } else {
-                soakStart = null;
+                soakStart = null; wheelStart = null;
                 etaRow(cv, t, 170, 'OIL READY IN', eta('oil', d.oil, warm, d), warm);
                 etaRow(cv, t, 255, 'COOLANT READY IN', eta('coolant', d.coolant, warmC, d), warmC);
             }
@@ -352,14 +361,17 @@ mgu.run({
         function drawTurbo(cv, t, d) {
             const room = G.pageBottom(cv) - G.BOTTOM, half = Math.round(room / 2);
             // (the title is part of a cached panel image: keep it to two fixed texts, the average goes beside it)
-            const title = turbo.glowing ? 'Turbine hot spot: GLOWING' : 'Turbine hot spot (estimate)';
-            hotBar(cv, t, G.TOP, 225 + half, turbo.Thot, title);
-            if (G.isNum(turbo.Th)) cv.text('housing average ' + Math.round(T(turbo.Th)) + tU(), 24 + 18 + cv.textWidth(title, 26) + 28, G.TOP + 42, 22, t.dim);
-            const dpTitle = turbo.pipeGlowing ? 'Downpipe: GLOWING' : 'Downpipe (estimate)';
-            hotBar(cv, t, G.TOP + 242 + half, 225 - half, turbo.Tp, dpTitle);
+            // the housing as a thermometer on its outside reads it; the hot spot inside (where the gas
+            // turns into the volute) is what glows first under a pull
+            const title = turbo.glowing ? 'Turbo housing: GLOWING' : 'Turbo housing (estimate)';
+            hotBar(cv, t, G.TOP, 225 + half, turbo.Th, title);
+            if (G.isNum(turbo.Thot)) cv.text('inside: hottest wall ' + Math.round(T(turbo.Thot)) + tU() + ', turbine wheel ' + Math.round(T(turbo.Tw)) + tU(), 24 + 18 + cv.textWidth(title, 26) + 28, G.TOP + 42, 22, turbo.glowing || turbo.wheelHot ? t.warn : t.dim);
+            // the downpipe holds the catalyst: the bar is its hottest part, the pipe or the brick
+            const dpTitle = turbo.pipeGlowing ? 'Downpipe: GLOWING' : 'Downpipe + cat (estimate)';
+            hotBar(cv, t, G.TOP + 242 + half, 225 - half, turbo.downpipe, dpTitle);
             if (G.isNum(turbo.Tc)) {
                 const cat = G.isNum(turbo.catDme) ? 'catalyst ' + Math.round(T(turbo.catDme)) + tU() + ' (DME)' : 'catalyst ~' + Math.round(T(turbo.Tc)) + tU();
-                cv.text(cat, 24 + 18 + cv.textWidth(dpTitle, 26) + 28, G.TOP + 242 + half + 42, 22, t.dim);
+                cv.text('pipe ' + Math.round(T(turbo.Tp)) + tU() + ', ' + cat, 24 + 18 + cv.textWidth(dpTitle, 26) + 28, G.TOP + 242 + half + 42, 22, t.dim);
             }
 
             const sp = G.panel(cv, t, 928, 44, 648, 468, null);
@@ -402,7 +414,7 @@ mgu.run({
             const now0 = thist.length ? thist[thist.length - 1][0] : mono();
             const span = G.clamp(thist.length ? now0 - thist[0][0] : 0, 300000, 1200000);
             const X = (ts) => gx + gw - ((now0 - ts) / span) * gw, Y = (c) => gy + gh - G.clamp(c / 1000, 0, 1) * gh;
-            cv.fillRect(gx, gy - 20, 22, 4, t.oil || t.accent); cv.text('HOT SPOT', gx + 30, gy - 11, 20, t.dim, { font: 'bold' });
+            cv.fillRect(gx, gy - 20, 22, 4, t.oil || t.accent); cv.text('HOUSING', gx + 30, gy - 11, 20, t.dim, { font: 'bold' });
             cv.fillRect(gx + 150, gy - 20, 22, 4, t.cold); cv.text('DOWNPIPE', gx + 180, gy - 11, 20, t.dim, { font: 'bold' });
             [[1, t.oil || t.accent], [2, t.cold]].forEach(([i, c]) => {
                 const pts = thist.filter((h) => G.isNum(h[i])).map((h) => [X(h[0]), Y(h[i])]).filter((p) => p[0] >= gx);

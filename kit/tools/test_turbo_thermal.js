@@ -48,7 +48,7 @@ const checks = [
     ['[M] engine-off cool-down follows the measured curve', () => {
         const tt = bench(1.7);
         tt.update(OFF, 0);
-        tt.Th = COOL(0); tt.Tb = 140; tt.Td = 500;
+        tt.Th = COOL(0); tt.Tb = 140; tt.Td = 500; tt.Tw = COOL(0);   // (the wheel stopped at least as hot as the housing)
         let sq = 0, n = 0, worst = 0;
         for (let t = 0; t <= 440; t += 1) {
             const e = tt.Th - COOL(t);
@@ -62,7 +62,7 @@ const checks = [
     ['[M] the housing is still above 400 C 7 minutes after a full-load stop', () => {
         const tt = bench(1.7);
         tt.update(OFF, 0);
-        tt.Th = COOL(0); tt.Tb = 140; tt.Td = 500;
+        tt.Th = COOL(0); tt.Tb = 140; tt.Td = 500; tt.Tw = COOL(0);   // (the wheel stopped at least as hot as the housing)
         run(tt, OFF, 420, 1);
         assert(tt.Th > 400, 'after 420 s: ' + tt.Th.toFixed(0));
     }],
@@ -116,7 +116,7 @@ const checks = [
             if (glowAt === null && tt.glowing) glowAt = t;
         }
         assert(glowAt !== null && glowAt < 15, 'glow at ' + glowAt);
-        assert(tt.Thot > 750, 'hot spot after 30 s ' + tt.Thot.toFixed(0));
+        assert(tt.Thot > 720, 'hot spot after 30 s ' + tt.Thot.toFixed(0));
         run(tt, Object.assign({ rpm: 750, torque: 20, speed: 0 }, base), 120, 0.25);
         assert(!tt.glowing && Math.abs(tt.Thot - tt.Th) < 30, 'still glowing after 2 min idle: ' + tt.Thot.toFixed(0) + ' / ' + tt.Th.toFixed(0));
         const idle = new TurboThermal({ litres: 2.0 });
@@ -130,7 +130,7 @@ const checks = [
         assert(!tt.pipeGlowing, 'downpipe glowing at 110 km/h: ' + tt.Tp.toFixed(0));
         let at = null;
         for (let t = 0.1; t <= 40; t += 0.1) { tt.update(Object.assign({ rpm: 5500, torque: 450, speed: 160 }, base), 0.1); if (at === null && tt.pipeGlowing) at = t; }
-        assert(at !== null && at < 30, 'downpipe glow at ' + at);
+        assert(at !== null && at < 40, 'downpipe glow at ' + at);   // the bare pipe, a little after the turbo
         assert(tt.Tp > tt.Td, 'the thin pipe should lead the heavy downpipe and catalyst: ' + tt.Tp.toFixed(0) + ' / ' + tt.Td.toFixed(0));
         console.log('    downpipe glows after ' + at.toFixed(1) + ' s of full throttle, ' + tt.Tp.toFixed(0) + ' C at 40 s');
     }],
@@ -152,6 +152,76 @@ const checks = [
         assert(!tt.learning, 'still says it is learning with no DME figure');
         console.log('    learned ' + tt.learn.map((x) => x.toFixed(0)).join(' / ') + ' C across the flow bands (truth +120)');
     }],
+    ['what the owner read: about 320 C on the outside of the housing after normal driving', () => {
+        // G20 330i stage 1, 2026-11-11: "around 320 C ish outside of exhaust housing after driving normally",
+        // read a minute or two after stopping. An IR thermometer set for paint (0.95) reads oxidised cast
+        // steel (0.7-0.8) some 25-45 C low, so the housing itself was about 345-365 C then.
+        const tt = new TurboThermal({ litres: 2.0 }), base = { coolant: 92, oil: 100, ambient: 20 };
+        const step = (d, secs) => run(tt, Object.assign({}, base, d), secs, 0.5);
+        for (let lap = 0; lap < 10; lap++) {             // 20 min: lights, pulling away, town, an 80 zone
+            step({ rpm: 750, torque: 20, speed: 0 }, 20);
+            step({ rpm: 2500, torque: 160, speed: 30 }, 6);
+            step({ rpm: 1500, torque: 60, speed: 50 }, 50);
+            step({ rpm: 2200, torque: 140, speed: 70 }, 5);
+            step({ rpm: 1700, torque: 80, speed: 80 }, 39);
+        }
+        assert(!tt.glowing, 'glowing in normal driving: ' + tt.Thot.toFixed(0));
+        const off = Object.assign({ rpm: 0, torque: 0, speed: 0 }, base), at = {};
+        for (let s = 1; s <= 120; s++) { tt.update(off, 1); if (s === 60 || s === 120) at[s] = tt.Th; }
+        near(at[60], 355, 35, 'housing a minute after stopping');
+        near(at[120], 345, 35, 'housing two minutes after stopping');
+        console.log('    normal driving, then parked: housing ' + at[60].toFixed(0) + ' C after a minute, ' + at[120].toFixed(0) + ' C after two (owner read ~320 on an IR gun)');
+    }],
+    ['switching off: a hard pull asks for about a minute at idle, town driving for none', () => {
+        // on the car: "OK to switch off" straight after a very hard pull. Owner's manuals ask for about a
+        // minute's idle after heavy load (Kia, Hyundai); 30-60 s is the usual advice
+        const base = { coolant: 95, oil: 105, ambient: 20 }, IDLE = Object.assign({ rpm: 750, torque: 20, speed: 0 }, base);
+        const after = (fn) => { const tt = new TurboThermal({ litres: 2.0 }); fn((d, secs, dt) => run(tt, Object.assign({}, base, d), secs, dt || 0.5)); return tt; };
+        const town = after((go) => go({ rpm: 1500, torque: 60, speed: 50 }, 600));
+        assert.strictEqual(town.secondsToSafe(180, IDLE), 0, 'town driving should be fine to switch off');
+        const cruise = () => after((go) => go({ rpm: 2000, torque: 110, speed: 110 }, 600));
+        const motorway = cruise().secondsToSafe(180, IDLE);
+        assert(motorway <= 40, 'after a motorway cruise: ' + motorway + ' s');
+        const pulled = cruise();
+        for (let s = 0; s < 8; s++) run(pulled, Object.assign({ rpm: 3000 + s * 400, torque: 450, speed: 110 + s * 6 }, base), 1, 0.1);
+        const wait = pulled.secondsToSafe(180, IDLE);
+        assert(pulled.wheelHot, 'the wheel should be hot after a pull: ' + pulled.Tw.toFixed(0));
+        assert(wait >= 30 && wait <= 90, 'after one hard pull: ' + wait + ' s at idle');
+        // and it holds: idling that long really does settle it
+        run(pulled, IDLE, wait, 0.5);
+        assert(!pulled.wheelHot && pulled.soak <= 180, 'still not safe after the ' + wait + ' s it said');
+        console.log('    idle before switching off: town 0 s, motorway ' + motorway + ' s, one hard pull ' + wait + ' s');
+    }],
+    ['no steady cruise glows, whatever the DME catalyst says, and the gas stays at cruise levels', () => {
+        // on the car: "glowing" at a cruise. Reported turbine-inlet gas at a closed-loop cruise on turbo petrol
+        // engines is 700-800 C; a turbo is seen glowing only after hard pulls
+        const base = { coolant: 95, oil: 105, ambient: 15 };
+        let worst = null;
+        for (const cat of [null, 600, 700, 750]) {
+            for (const [rpm, torque, speed] of [[1800, 90, 80], [2000, 110, 110], [2300, 125, 130]]) {   // a 330i needs about 30 kW at 130 km/h
+                const tt = new TurboThermal({ litres: 2.0 });
+                run(tt, Object.assign({ rpm, torque, speed, catDme: cat }, base), 400, 0.25);
+                assert(!tt.glowing && !tt.pipeGlowing, 'glowing at ' + rpm + ' rpm ' + torque + ' Nm, DME ' + cat + ': hot spot ' + tt.Thot.toFixed(0) + ', pipe ' + tt.Tp.toFixed(0));
+                assert(tt.Tg <= 830, 'gas ' + tt.Tg.toFixed(0) + ' C at a cruise (' + rpm + ' rpm ' + torque + ' Nm, DME ' + cat + ')');
+                if (!worst || tt.Thot > worst.Thot) worst = { Thot: tt.Thot, Tg: tt.Tg, Th: tt.Th, at: rpm + ' rpm ' + torque + ' Nm, DME ' + cat };
+            }
+        }
+        console.log('    hottest cruise: ' + worst.at + ': gas ' + worst.Tg.toFixed(0) + ', housing ' + worst.Th.toFixed(0) + ', hot spot ' + worst.Thot.toFixed(0) + ' C');
+    }],
+    ['a hot catalyst: the downpipe holds it, the pipe and the housing are not hundreds of degrees under it', () => {
+        // on the car: the DME said 700 C at the catalyst while the downpipe read 200 C
+        const tt = new TurboThermal({ litres: 2.0 }), base = { coolant: 95, oil: 105, ambient: 15, catDme: 700 };
+        run(tt, Object.assign({ rpm: 2300, torque: 120, speed: 110 }, base), 240, 0.1);
+        assert(tt.downpipe >= 700, 'downpipe ' + tt.downpipe.toFixed(0) + ' under the catalyst in it');
+        assert(tt.Tp >= 470, 'thin pipe ' + tt.Tp.toFixed(0) + ' C with gas feeding a 700 C catalyst');
+        assert(tt.Th >= 420, 'housing average ' + tt.Th.toFixed(0) + ' C upstream of a 700 C catalyst');
+        assert(tt.Tg >= 700, 'gas ' + tt.Tg.toFixed(0) + ' C at the turbine, cooler than the catalyst after it');
+        console.log('    DME catalyst 700 C at a cruise: gas ' + tt.Tg.toFixed(0) + ', housing ' + tt.Th.toFixed(0) + ', pipe ' + tt.Tp.toFixed(0) + ', downpipe ' + tt.downpipe.toFixed(0) + ' (' + tt.dpPart + ')');
+        // after a hot stop the brick holds its heat longer than the bare pipe: the downpipe shows the brick
+        const hot = new TurboThermal({ litres: 2.0 });
+        hot.update({ rpm: 800, torque: 20, speed: 0, coolant: 95, oil: 100, ambient: 15, catDme: 650 }, 0.1);
+        assert(hot.downpipe >= 650 && hot.Th >= 400, 'restart beside a 650 C catalyst: downpipe ' + hot.downpipe.toFixed(0) + ', housing ' + hot.Th.toFixed(0));
+    }],
     ['no DME: the model is exactly what it was', () => {
         const a = new TurboThermal({ litres: 2.0 }), b = new TurboThermal({ litres: 2.0 });
         const d = { rpm: 4000, torque: 300, speed: 120, coolant: 95, oil: 110, ambient: 20 };
@@ -161,7 +231,7 @@ const checks = [
     ['[H] a hot stop soaks the bearing housing about 60 C, to around 220 C', () => {
         const tt = new TurboThermal({ litres: 2.0 });
         tt.update({ rpm: 5500, torque: 400, speed: 180, coolant: 105, oil: 120, ambient: 25 }, 0);
-        tt.Th = 760; tt.Tb = 160; tt.Td = 620;
+        tt.Th = 760; tt.Tb = 160; tt.Td = 620; tt.Tw = 760;
         const stop = { rpm: 0, torque: 0, speed: 0, coolant: 105, oil: 120, ambient: 25 };
         tt.update(stop, 0.25);
         const start = tt.Tb, peak = tt.soakPeak(tt._state());
