@@ -195,11 +195,42 @@ const checks = [
         assert.strictEqual(usage(log, 54, 23010, now).per100, null, 'not until 50 km');
         assert.strictEqual(usage([{ at: now, fuel: '98', litres: 5, vAfter: 40 }], 30, 24000, now).per100, null, 'no odometer');
     }],
+    ['a drop the engine cannot have made is held back; a slow one and a fill are taken', () => {
+        const tank = new Tank({ reader: { value: () => Promise.resolve(null) } });
+        let t = 1000;
+        const feed = (dme, kombi) => { t += 2000; if (dme !== null) tank.dme = { v: dme, src: 'dme1', at: t }; if (kombi !== null) tank.kombi = { v: kombi, at: t }; return tank.now(t); };
+        for (let i = 0; i < 4; i++) feed(52, 52);
+        assert.strictEqual(feed(52, 52).v, 52);
+        // the engine unit reads 36 for a while (the car: 36 l with 52 in the tank): held at 52, and said
+        let r;
+        for (let i = 0; i < 10; i++) r = feed(36, 52);
+        assert.deepStrictEqual([r.v, r.dme, r.kombi], [52, 36, 52], 'the gauge, agreeing with the level, wins');
+        for (let i = 0; i < 10; i++) r = feed(36, null);
+        assert.strictEqual(r.v, 52, 'engine alone, 36: still 52');
+        assert.deepStrictEqual(r.ignored, { v: 36, src: 'dme1' });
+        assert.strictEqual(r.settled, false, 'not settled while a drop is in doubt');
+        // back to the truth: the doubt goes
+        for (let i = 0; i < 5; i++) r = feed(52, 52);
+        assert.deepStrictEqual([r.v, r.ignored, r.settled], [52, null, true]);
+        // driving: a litre at a time is taken
+        for (let i = 0; i < 5; i++) r = feed(51, 51);
+        assert.strictEqual(r.v, 51);
+        // a fill: taken at once
+        for (let i = 0; i < 5; i++) r = feed(70, 70);
+        assert.strictEqual(r.v, 70);
+        // a real drop that stays (5 minutes of readings): taken in the end
+        for (let i = 0; i < 160; i++) r = feed(60, 60);
+        assert.strictEqual(r.v, 60, 'a drop that stays is believed after 5 min');
+        // overnight: no readings for hours does not make a big drop believable
+        t += 8 * 3600000;
+        for (let i = 0; i < 5; i++) r = feed(36, 36);
+        assert.strictEqual(r.v, 60, 'a night parked burns no fuel');
+    }],
     ['no DME: the cluster gauge; nothing fresh: null', () => {
         const tank = new Tank({ reader: { value: () => Promise.resolve(null) } });
         assert.strictEqual(tank.now(Date.now()), null);
         tank.kombi = { v: 41, at: 5000 };
-        assert.deepStrictEqual(tank.now(6000), { v: 41, src: 'kombi', settled: false });
+        const k = tank.now(6000); assert.deepStrictEqual([k.v, k.src, k.settled, k.kombi, k.dme], [41, 'kombi', false, 41, null]);
         assert.strictEqual(tank.now(20000), null);
     }],
 ];

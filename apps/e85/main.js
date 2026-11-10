@@ -89,7 +89,8 @@ mgu.run({
         function read(now) {
             if (demoOn(now)) return { s: demo, v: demo.v, src: 'demo', settled: true, demo: true, km: demo.km };
             const r = tank.now(now);
-            return { s: real, v: r ? r.v : null, src: r ? r.src : null, settled: !!(r && r.settled), demo: false, km: tank.odo };
+            return { s: real, v: r ? r.v : null, src: r ? r.src : null, settled: !!(r && r.settled), demo: false, km: tank.odo,
+                dme: r ? r.dme : null, kombi: r ? r.kombi : null, ignored: r ? r.ignored : null };
         }
         /** What goes in the log with a fill of fuel: its price a litre and the odometer. */
         const extra = (r) => (fuel) => ({ price: prices[fuel], km: r.km });
@@ -319,7 +320,11 @@ mgu.run({
             cv.text(r.v === null ? 'no tank reading' : r.v.toFixed(1) + ' l of ' + cap() + ' l', 48, by + 50, 30, r.v === null ? t.dim : t.text, { font: 'bold' });
             if (r.v !== null) cv.text((r.v * b.e).toFixed(1) + ' l ethanol', 470, by + 50, 22, ETH, { align: 'right', font: 'bold' });
             const dy = p.y + p.h - G.BOTTOM;
-            cv.text(r.src ? 'level: ' + SRC[r.src] + (r.settled ? '' : ', settling') : 'waiting for the car', 48, 480 + G.toMargin(dy, 13), 20, t.dim);
+            // both sources, so a wrong one can be told; a drop the engine cannot have made is held back
+            const both = [r.dme !== null && r.dme !== undefined && 'engine ' + Math.round(r.dme) + ' l', r.kombi !== null && r.kombi !== undefined && 'gauge ' + Math.round(r.kombi) + ' l'].filter(Boolean).join(', ');
+            const lv = r.ignored ? 'ignoring a drop to ' + Math.round(r.ignored.v) + ' l (' + (r.ignored.src === 'kombi' ? 'gauge' : 'engine') + ')'
+                : r.src === 'demo' ? 'level: demo' : r.src ? 'level: ' + (both || SRC[r.src]) + (r.settled ? '' : ', settling') : 'waiting for the car';
+            cv.text(lv, 48, 480 + G.toMargin(dy, 13), 20, r.ignored ? t.warn : t.dim, { font: r.ignored ? 'bold' : undefined });
         }
 
         function drawTarget(cv, t, r) {

@@ -2,7 +2,7 @@
   "id": "e85",
   "title": "E85 Blend",
   "description": "The ethanol content in your tank from the fills you book and the car's own tank level, and how many litres of E85 or 98 hit your target: a top-up or a full tank, step by step at the pump. Warns before your tune's safe limit, and tracks what fuel costs you",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "vendor": "dante",
   "loggingId": "OAA1",
   "iconGlyph": "e85",
